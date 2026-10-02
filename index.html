@@ -111,7 +111,7 @@ header{display:flex;justify-content:space-between;align-items:flex-start;gap:12p
 <section id="settings" class="view">
   <div class="card">
     <h2>☁️ Cloud sync</h2>
-    <p class="tiny muted">Sign in with the same account on your laptop and phone. Your roadmap, goals, projects, XP, notes and targets can then sync through your Supabase database.</p>
+    <p class="tiny muted">Sign in with the same account on your laptop and phone. Your roadmap, goals, projects, XP, notes and targets sync through your Supabase account.</p>
     <div class="notice warn" style="margin-top:10px"><b>One-time setup:</b> create a free Supabase project, run the SQL file that came with this app, then paste your project's URL and publishable key below. Never paste a Supabase service-role key here.</div>
     <div class="stack" style="margin-top:10px">
       <div class="field"><label>Supabase Project URL</label><input id="sbUrl" type="text" placeholder="https://xxxxxxxx.supabase.co"></div>
@@ -222,170 +222,212 @@ function markActive(){let d=iso();if(!data.completedDates.includes(d))data.compl
 function showView(id){document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.getElementById(id).classList.add("active");document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===id));if(id==="ai")renderChat();window.scrollTo({top:0,behavior:"smooth"})}
 
 
+
 var sbSession=null;
 var syncTimer=null;
+var refreshTimer=null;
+var pollTimer=null;
 var syncing=false;
 var applyingRemote=false;
-var pollTimer=null;
-var DEVICE_KEY="brainmaxxing_device_id_v7";
+var lastLocalWrite=0;
+var lastKnownCloudUpdatedAt=null;
+const DEVICE_KEY="brainmaxxing_device_id_v12";
 var deviceId=localStorage.getItem(DEVICE_KEY);
 if(!deviceId){
   deviceId=(crypto.randomUUID?crypto.randomUUID():("dev-"+Math.random().toString(36).slice(2)+Date.now()));
   localStorage.setItem(DEVICE_KEY,deviceId);
 }
+const SESSION_KEY="brainmaxxing_auth_session_v12";
+const OLD_SESSION_KEY="brainmaxxing_auth_session_v7";
 
 function sbConfigured(){return !!(data.settings?.supabaseUrl && data.settings?.supabaseKey)}
 function sbBase(){return (data.settings.supabaseUrl||"").replace(/\/+$/,"")}
 function sbHeaders(token){
-  return {
-    "Content-Type":"application/json",
-    "apikey":data.settings.supabaseKey,
-    ...(token?{"Authorization":"Bearer "+token}:{})
-  };
-}
-function sbSaveSession(session){
-  sbSession=session||null;
-  if(session)localStorage.setItem("brainmaxxing_auth_session_v7",JSON.stringify(session));
-  else localStorage.removeItem("brainmaxxing_auth_session_v7");
-}
-function sbLoadSession(){
-  try{sbSession=JSON.parse(localStorage.getItem("brainmaxxing_auth_session_v7")||"null")}catch(e){sbSession=null}
-  return sbSession;
-}
-function saveSupabaseConfig(){
-  const url=document.getElementById("sbUrl").value.trim();
-  const key=document.getElementById("sbKey").value.trim();
-  const status=document.getElementById("sbConnection");
-  if(!url||!key){
-    status.textContent="Enter both the Project URL and Publishable key.";
-    status.className="notice warn";
-    showToast("Missing Supabase URL or key");
-    return;
-  }
-  if(!(url.startsWith("https://") || url.startsWith("http://"))){
-    status.textContent="The Project URL should start with https://";
-    status.className="notice warn";
-    return;
-  }
-  data.settings.supabaseUrl=url;
-  data.settings.supabaseKey=key;
-  saveLocalOnly();
-  status.textContent="✅ Supabase connection details saved. You can now create or sign in to your cloud account.";
-  status.className="notice success";
-  showToast("Supabase connection saved");
+  return {"Content-Type":"application/json","apikey":data.settings.supabaseKey,...(token?{"Authorization":"Bearer "+token}:{})};
 }
 function saveLocalOnly(){localStorage.setItem(KEY,JSON.stringify(data))}
-async function sbFetch(path,options={}){
-  const r=await fetch(sbBase()+path,{...options,headers:{...sbHeaders(sbSession?.access_token),...(options.headers||{})}});
-  let body=null; try{body=await r.json()}catch(e){}
-  if(!r.ok) throw new Error(body?.msg||body?.message||body?.error_description||body?.error?.message||("HTTP "+r.status));
+function save(){
+  saveLocalOnly();
+  lastLocalWrite=Date.now();
+  scheduleAutoSync();
+}
+function persistSession(){
+  if(sbSession)localStorage.setItem(SESSION_KEY,JSON.stringify(sbSession));
+  else localStorage.removeItem(SESSION_KEY);
+}
+function loadPersistedSession(){
+  try{
+    var raw=localStorage.getItem(SESSION_KEY)||localStorage.getItem(OLD_SESSION_KEY);
+    sbSession=raw?JSON.parse(raw):null;
+    if(sbSession && !localStorage.getItem(SESSION_KEY))localStorage.setItem(SESSION_KEY,JSON.stringify(sbSession));
+  }catch(e){sbSession=null}
+}
+function jwtExpiryMs(token){
+  try{
+    var p=JSON.parse(atob(token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
+    return (Number(p.exp)||0)*1000;
+  }catch(e){return 0}
+}
+async function refreshSessionIfNeeded(force=false){
+  if(!sbSession?.refresh_token || !sbConfigured())return !!sbSession;
+  var exp=jwtExpiryMs(sbSession.access_token);
+  if(!force && exp && Date.now()<exp-60000)return true;
+  try{
+    var body=await sbFetchRaw("/auth/v1/token?grant_type=refresh_token",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({refresh_token:sbSession.refresh_token})
+    });
+    if(body?.access_token){
+      sbSession={...sbSession,...body};
+      persistSession();
+      scheduleTokenRefresh();
+      return true;
+    }
+  }catch(e){
+    // Only clear the local session when refresh is definitely invalid.
+    var msg=String(e.message||"");
+    if(/refresh token|invalid|not found|expired/i.test(msg)){sbSession=null;persistSession();stopPolling();}
+  }
+  return !!sbSession;
+}
+function scheduleTokenRefresh(){
+  clearTimeout(refreshTimer);
+  if(!sbSession?.access_token)return;
+  var exp=jwtExpiryMs(sbSession.access_token);
+  if(!exp)return;
+  var wait=Math.max(15000,exp-Date.now()-120000);
+  refreshTimer=setTimeout(()=>refreshSessionIfNeeded(true),wait);
+}
+async function sbFetchRaw(path,options={}){
+  var r=await fetch(sbBase()+path,{...options,headers:{...sbHeaders(sbSession?.access_token),...(options.headers||{})}});
+  var body=null; try{body=await r.json()}catch(e){}
+  if(!r.ok)throw new Error(body?.msg||body?.message||body?.error_description||body?.error?.message||("HTTP "+r.status));
   return body;
+}
+async function sbFetch(path,options={}){
+  await refreshSessionIfNeeded(false);
+  return await sbFetchRaw(path,options);
+}
+function saveSupabaseConfig(){
+  var url=document.getElementById("sbUrl").value.trim();
+  var key=document.getElementById("sbKey").value.trim();
+  var status=document.getElementById("sbConnection");
+  if(!url||!key){
+    status.textContent="Enter both the Project URL and Publishable key.";
+    status.className="notice warn"; showToast("Missing Supabase URL or key"); return;
+  }
+  if(!(url.startsWith("https://")||url.startsWith("http://"))){
+    status.textContent="The Project URL should start with https://";
+    status.className="notice warn"; return;
+  }
+  data.settings.supabaseUrl=url; data.settings.supabaseKey=key; saveLocalOnly();
+  status.textContent="✅ Supabase configured. Your account can use persistent login and cloud sync.";
+  status.className="notice success"; showToast("Supabase connection saved");
 }
 async function signUpAccount(){
   if(!sbConfigured())return showToast("Save Supabase connection first");
-  const email=document.getElementById("authEmail").value.trim();
-  const password=document.getElementById("authPassword").value;
+  var email=document.getElementById("authEmail").value.trim(),password=document.getElementById("authPassword").value;
   if(!email||!password)return showToast("Enter email and password");
   try{
-    const body=await sbFetch("/auth/v1/signup",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({email,password})
-    });
-    if(body?.access_token)sbSaveSession(body);
-    const text=body?.access_token
-      ?"✅ Account created and signed in. Upload your device to the cloud."
-      :"✅ Account created. Check your email if confirmation is enabled, then use Sign in.";
-    document.getElementById("authStatus").textContent=text;
-    renderSettings(); if(sbSession)startPolling();
+    var body=await sbFetchRaw("/auth/v1/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});
+    if(body?.access_token){sbSession=body;persistSession();scheduleTokenRefresh();startPolling()}
+    document.getElementById("authStatus").textContent=body?.access_token
+      ?"✅ Account created and signed in. Upload your device to cloud."
+      :"✅ Account created. Check your email if confirmation is required, then sign in.";
+    renderSettings();
   }catch(e){document.getElementById("authStatus").textContent="Signup error: "+e.message}
 }
 async function signInAccount(){
   if(!sbConfigured())return showToast("Save Supabase connection first");
-  const email=document.getElementById("authEmail").value.trim();
-  const password=document.getElementById("authPassword").value;
+  var email=document.getElementById("authEmail").value.trim(),password=document.getElementById("authPassword").value;
   if(!email||!password)return showToast("Enter email and password");
   try{
-    const body=await sbFetch("/auth/v1/token?grant_type=password",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({email,password})
-    });
-    sbSaveSession(body);
+    var body=await sbFetchRaw("/auth/v1/token?grant_type=password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});
+    sbSession=body; persistSession(); scheduleTokenRefresh(); startPolling();
     document.getElementById("authStatus").textContent="✅ Signed in as "+(body.user?.email||email);
-    renderSettings(); await downloadCloud(false); startPolling(); showToast("Signed in");
+    renderSettings(); await reconcileCloud("login"); showToast("Signed in");
   }catch(e){document.getElementById("authStatus").textContent="Sign-in error: "+e.message}
 }
 async function signOutAccount(){
-  try{if(sbSession&&sbConfigured())await sbFetch("/auth/v1/logout",{method:"POST"})}catch(e){}
-  sbSaveSession(null); stopPolling(); renderSettings(); showToast("Signed out");
+  // Local-only sign out prevents accidentally revoking the session on the other device.
+  sbSession=null; persistSession(); stopPolling(); renderSettings(); showToast("Signed out on this device");
 }
 function syncPayload(){
-  const copy=JSON.parse(JSON.stringify(data));
+  var copy=JSON.parse(JSON.stringify(data));
   if(copy.settings){copy.settings.supabaseKey="";copy.settings.appToken="";}
-  copy.__sync={deviceId,clientVersion:"v7"};
+  copy.__sync={deviceId,clientVersion:"v12"};
   return copy;
 }
-function mergeCloudToLocal(cloud){
+function mergeCloudToLocal(cloud,updatedAt){
   if(!cloud)return false;
-  const savedSettings={...data.settings};
+  var savedSettings={...data.settings};
   data=cloud;
   data.settings={...(data.settings||{}),
     supabaseUrl:savedSettings.supabaseUrl||"",
     supabaseKey:savedSettings.supabaseKey||"",
-    mode:savedSettings.mode||"smart",
-    backendUrl:savedSettings.backendUrl||"",
-    appToken:savedSettings.appToken||"",
-    provider:savedSettings.provider||"gemini"};
-  ensure();
+    mode:savedSettings.mode||"smart",backendUrl:savedSettings.backendUrl||"",
+    appToken:savedSettings.appToken||"",provider:savedSettings.provider||"gemini"};
+  data.__cloudUpdatedAt=updatedAt||data.__cloudUpdatedAt||null;
+  lastKnownCloudUpdatedAt=updatedAt||lastKnownCloudUpdatedAt;
+  saveLocalOnly();
   return true;
 }
 async function uploadCloud(show=true){
-  if(!sbSession)return showToast("Sign in first");
-  if(syncing||applyingRemote)return;
+  if(!sbSession)return false;
+  if(syncing||applyingRemote)return false;
   syncing=true; setSyncText("☁ Uploading…");
   try{
-    const payload=syncPayload();
-    const row=await sbFetch("/rest/v1/user_states?on_conflict=user_id",{
+    var ok=await refreshSessionIfNeeded(false); if(!ok)throw new Error("Session expired. Please sign in again.");
+    var payload=syncPayload();
+    var now=new Date().toISOString();
+    var rows=await sbFetch("/rest/v1/user_states?on_conflict=user_id",{
       method:"POST",
       headers:{"Prefer":"resolution=merge-duplicates,return=representation"},
-      body:JSON.stringify({user_id:sbSession.user.id,state:payload,device_id:deviceId,updated_at:new Date().toISOString()})
+      body:JSON.stringify({user_id:sbSession.user.id,state:payload,device_id:deviceId,updated_at:now})
     });
-    data.__cloudUpdatedAt=row?.[0]?.updated_at||new Date().toISOString();
-    saveLocalOnly();
-    setSyncText("☁ Sync on · uploaded "+new Date().toLocaleTimeString());
-    if(show)showToast("Uploaded to cloud");
-  }catch(e){setSyncText("Upload failed: "+e.message)}
+    var t=rows?.[0]?.updated_at||now;
+    data.__cloudUpdatedAt=t; lastKnownCloudUpdatedAt=t; saveLocalOnly();
+    setSyncText("☁ Auto-sync on · saved "+new Date().toLocaleTimeString());
+    if(show)showToast("Saved to cloud");
+    return true;
+  }catch(e){setSyncText("Cloud sync error: "+e.message);return false}
   finally{syncing=false}
+}
+async function getCloudRow(){
+  var rows=await sbFetch("/rest/v1/user_states?select=state,updated_at,device_id&user_id=eq."+encodeURIComponent(sbSession.user.id)+"&limit=1",{method:"GET"});
+  return rows?.[0]||null;
 }
 async function downloadCloud(show=true){
   if(!sbSession)return showToast("Sign in first");
-  if(syncing)return;
-  syncing=true; setSyncText("☁ Downloading…");
+  if(syncing)return false; syncing=true; setSyncText("☁ Checking cloud…");
   try{
-    const rows=await sbFetch("/rest/v1/user_states?select=state,updated_at,device_id&user_id=eq."+encodeURIComponent(sbSession.user.id)+"&limit=1",{method:"GET"});
-    const row=rows?.[0];
+    var row=await getCloudRow();
     if(!row){setSyncText("☁ No cloud copy yet. Upload this device first.");return false}
-    if(row.device_id!==deviceId || !data.__cloudUpdatedAt || new Date(row.updated_at)>new Date(data.__cloudUpdatedAt||0)){
-      applyingRemote=true;
-      mergeCloudToLocal(row.state);
-      data.__cloudUpdatedAt=row.updated_at||null;
-      saveLocalOnly();
-      applyingRemote=false;
+    var cloudTime=new Date(row.updated_at||0).getTime(),localTime=new Date(data.__cloudUpdatedAt||0).getTime();
+    if(cloudTime>=localTime || !lastLocalWrite){
+      applyingRemote=true; mergeCloudToLocal(row.state,row.updated_at); applyingRemote=false;
       render();
     }
-    setSyncText("☁ Sync on · checked "+new Date().toLocaleTimeString());
+    setSyncText("☁ Auto-sync on · checked "+new Date().toLocaleTimeString());
     if(show)showToast("Cloud state loaded");
     return true;
-  }catch(e){setSyncText("Download failed: "+e.message);return false}
+  }catch(e){setSyncText("Cloud check failed: "+e.message);return false}
   finally{syncing=false}
 }
-async function syncNow(){
-  if(!sbSession)return showToast("Sign in first");
-  await downloadCloud(false);
-  await uploadCloud(false);
-  setSyncText("☁ Sync on · "+new Date().toLocaleTimeString());
-  showToast("Synced");
+async function reconcileCloud(reason){
+  if(!sbSession)return;
+  try{
+    var row=await getCloudRow();
+    if(!row){await uploadCloud(false);return}
+    var cloudTime=new Date(row.updated_at||0).getTime();
+    var localTime=new Date(data.__cloudUpdatedAt||0).getTime();
+    // On first login, cloud wins if it has a state. Otherwise local changes are uploaded.
+    if(reason==="login" && row.state){
+      applyingRemote=true; mergeCloudToLocal(row.state,row.updated_at); applyingRemote=false; render(); return;
+    }
+    if(cloudTime>localTime && cloudTime>lastLocalWrite){applyingRemote=true;mergeCloudToLocal(row.state,row.updated_at);applyingRemote=false;render();return}
+    await uploadCloud(false);
+  }catch(e){setSyncText("Sync error: "+e.message)}
 }
 function scheduleAutoSync(){
   if(!sbSession||applyingRemote)return;
@@ -395,32 +437,21 @@ function scheduleAutoSync(){
 async function pollCloud(){
   if(!sbSession||syncing||applyingRemote)return;
   try{
-    const rows=await sbFetch("/rest/v1/user_states?select=state,updated_at,device_id&user_id=eq."+encodeURIComponent(sbSession.user.id)+"&limit=1",{method:"GET"});
-    const row=rows?.[0]; if(!row)return;
-    const cloudTime=new Date(row.updated_at||0).getTime();
-    const localTime=new Date(data.__cloudUpdatedAt||0).getTime();
-    if(row.device_id!==deviceId && cloudTime>localTime){
-      applyingRemote=true;
-      const settings={...data.settings}; data=row.state;
-      data.settings={...(data.settings||{}),
-        supabaseUrl:settings.supabaseUrl||"",
-        supabaseKey:settings.supabaseKey||"",
-        mode:settings.mode||"smart",backendUrl:settings.backendUrl||"",
-        appToken:settings.appToken||"",provider:settings.provider||"gemini"};
-      data.__cloudUpdatedAt=row.updated_at;
-      saveLocalOnly(); applyingRemote=false; render();
+    await refreshSessionIfNeeded(false);
+    var row=await getCloudRow(); if(!row)return;
+    var cloudTime=new Date(row.updated_at||0).getTime(),localCloud=new Date(data.__cloudUpdatedAt||0).getTime();
+    if(row.device_id!==deviceId && cloudTime>localCloud && cloudTime>lastLocalWrite){
+      applyingRemote=true; mergeCloudToLocal(row.state,row.updated_at); applyingRemote=false; render();
       setSyncText("☁ Updated from your other device · "+new Date().toLocaleTimeString());
       showToast("Synced from other device");
     }
   }catch(e){}
 }
 function startPolling(){
-  stopPolling();
-  pollCloud();
-  pollTimer=setInterval(pollCloud,5000);
+  stopPolling(); scheduleTokenRefresh(); pollCloud(); pollTimer=setInterval(pollCloud,3000);
 }
-function stopPolling(){if(pollTimer)clearInterval(pollTimer);pollTimer=null}
-function setSyncText(s){const el=document.getElementById("syncStatus");if(el)el.textContent=s}
+function stopPolling(){if(pollTimer)clearInterval(pollTimer);pollTimer=null;clearTimeout(refreshTimer);refreshTimer=null}
+function setSyncText(s){var el=document.getElementById("syncStatus");if(el)el.textContent=s}
 
 function render(){ensure();renderDashboard();renderWeek();renderRoadmap();renderProjects();renderSettings();renderChat()}
 function renderDashboard(){
@@ -479,14 +510,18 @@ function exportData(){let b=new Blob([JSON.stringify(data,null,2)],{type:"applic
 function importData(e){let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{data=JSON.parse(r.result);ensure();save();render();showToast("Backup imported")}catch(err){alert("Invalid backup file")}};r.readAsText(f);e.target.value=""}
 function showToast(s){let e=document.getElementById("toast");e.textContent=s;e.style.display="block";clearTimeout(window.tt);window.tt=setTimeout(()=>e.style.display="none",1800)}
 let deferredPrompt=null;window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredPrompt=e;document.getElementById("installCard").classList.add("show")});async function installPWA(){if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null}else showToast("Use browser menu → Install app / Add to Home screen")}
+loadPersistedSession();
+if(sbSession)scheduleTokenRefresh();
 if("serviceWorker" in navigator)window.addEventListener("load",async()=>{
   try{
     const regs=await navigator.serviceWorker.getRegistrations();
     for(const reg of regs){try{await reg.unregister()}catch(e){}}
-    await navigator.serviceWorker.register("sw.js?v=11",{updateViaCache:"none"});
+    await navigator.serviceWorker.register("sw.js?v=12",{updateViaCache:"none"});
   }catch(e){}
 });
+ensure();
 render();
+if(sbSession)startPolling();
 </script>
 </body>
 </html>
