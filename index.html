@@ -257,7 +257,7 @@ function saveSupabaseConfig(){
     showToast("Missing Supabase URL or key");
     return;
   }
-  if(!/^https:\/\/[^\\s]+\\.supabase\\.co$/i.test(url) && !/^https?:\\/\\//i.test(url)){
+  if(!(url.startsWith("https://") || url.startsWith("http://"))){
     status.textContent="The Project URL should start with https://";
     status.className="notice warn";
     return;
