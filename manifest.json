@@ -1,8 +1,8 @@
 {
   "name": "brainMAXXING",
   "short_name": "brainMAXXING",
-  "description": "Personal CSE + AI command center with reliable cloud sync",
-  "start_url": "./?v=10",
+  "description": "Personal CSE + AI command center with reliable sync",
+  "start_url": "./?v=11",
   "display": "standalone",
   "background_color": "#090d13",
   "theme_color": "#090d13",

@@ -32,6 +32,7 @@ header{display:flex;justify-content:space-between;align-items:flex-start;gap:12p
 </style>
 </head>
 <body>
+<div id="runtimeError" class="notice warn" style="display:none;margin-bottom:10px"></div>
 <div class="app">
 <header>
   <div class="brand"><h1>brainMAXXING</h1><p>One place to learn, build, track, publish and eventually earn — with an AI copilot when you connect one.</p></div>
@@ -175,7 +176,12 @@ header{display:flex;justify-content:space-between;align-items:flex-start;gap:12p
 <div id="toast" style="position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:30;display:none;background:#17232f;border:1px solid #344960;border-radius:10px;padding:9px 12px;font-size:12px"></div>
 
 <script>
-const KEY="ai_cse_command_center_v3";
+window.addEventListener("error",(e)=>{
+  const box=document.getElementById("runtimeError");
+  if(box){box.style.display="block";box.textContent="App error: "+(e.message||"Unknown error");}
+});
+
+var KEY="ai_cse_command_center_v3";
 const phaseSeed=[
 ["Python from Zero","Weeks 1–5","Python"],["Git + GitHub","Weeks 1–6","Git/GitHub"],["DSA + CS Fundamentals","Months 2–4","DSA"],["Web Development","Months 3–5","Web"],["Backend + Databases","Months 4–6","Backend"],["Machine Learning","Months 6–7","ML"],["Deep Learning + PyTorch","Months 7–8","Deep Learning"],["LLMs + Generative AI","Months 8–10","LLM"],["AI Agents + Automation","Months 10–11","Agents"],["Production + Portfolio","Months 11–12+","Career"]];
 const taskSeed=[
@@ -216,13 +222,13 @@ function markActive(){let d=iso();if(!data.completedDates.includes(d))data.compl
 function showView(id){document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.getElementById(id).classList.add("active");document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===id));if(id==="ai")renderChat();window.scrollTo({top:0,behavior:"smooth"})}
 
 
-let sbSession=null;
-let syncTimer=null;
-let syncing=false;
-let applyingRemote=false;
-let pollTimer=null;
-const DEVICE_KEY="brainmaxxing_device_id_v7";
-let deviceId=localStorage.getItem(DEVICE_KEY);
+var sbSession=null;
+var syncTimer=null;
+var syncing=false;
+var applyingRemote=false;
+var pollTimer=null;
+var DEVICE_KEY="brainmaxxing_device_id_v7";
+var deviceId=localStorage.getItem(DEVICE_KEY);
 if(!deviceId){
   deviceId=(crypto.randomUUID?crypto.randomUUID():("dev-"+Math.random().toString(36).slice(2)+Date.now()));
   localStorage.setItem(DEVICE_KEY,deviceId);
@@ -473,8 +479,14 @@ function exportData(){let b=new Blob([JSON.stringify(data,null,2)],{type:"applic
 function importData(e){let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{data=JSON.parse(r.result);ensure();save();render();showToast("Backup imported")}catch(err){alert("Invalid backup file")}};r.readAsText(f);e.target.value=""}
 function showToast(s){let e=document.getElementById("toast");e.textContent=s;e.style.display="block";clearTimeout(window.tt);window.tt=setTimeout(()=>e.style.display="none",1800)}
 let deferredPrompt=null;window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredPrompt=e;document.getElementById("installCard").classList.add("show")});async function installPWA(){if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null}else showToast("Use browser menu → Install app / Add to Home screen")}
-if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))
-render()
+if("serviceWorker" in navigator)window.addEventListener("load",async()=>{
+  try{
+    const regs=await navigator.serviceWorker.getRegistrations();
+    for(const reg of regs){try{await reg.unregister()}catch(e){}}
+    await navigator.serviceWorker.register("sw.js?v=11",{updateViaCache:"none"});
+  }catch(e){}
+});
+render();
 </script>
 </body>
 </html>
