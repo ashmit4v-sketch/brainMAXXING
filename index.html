@@ -7,7 +7,7 @@
 <meta name="description" content="Personal AI + CSE learning command center">
 <link rel="manifest" href="manifest.json">
 <title>brainMAXXING</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <style>
 :root{--bg:#090d13;--panel:#101720;--panel2:#151e29;--text:#eef4fa;--muted:#8ea0b4;--border:#243345;--accent:#7c5cff;--green:#31d0aa;--red:#ff607d;--yellow:#ffc857}
 *{box-sizing:border-box}html{background:var(--bg)}body{margin:0;background:radial-gradient(circle at 80% -10%,#1c1740 0,#090d13 35%);color:var(--text);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
@@ -137,7 +137,7 @@ header{display:flex;justify-content:space-between;align-items:flex-start;gap:12p
       <button class="btn" onclick="downloadCloud()">☁️ Download cloud → this device</button>
       <button class="btn primary" onclick="syncNow()">↕ Sync now</button>
     </div>
-    <div id="syncStatus" class="tiny muted" style="margin-top:8px">No sync performed.</div>
+    <div id="syncStatus" class="tiny muted" style="margin-top:8px">Cloud sync not started yet.</div>
   </div>
 
   <div class="card">
@@ -216,114 +216,139 @@ function streak(){let s=new Set(data.completedDates||[]),d=new Date(),n=0;while(
 function markActive(){let d=iso();if(!data.completedDates.includes(d))data.completedDates.push(d)}
 function showView(id){document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.getElementById(id).classList.add("active");document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===id));if(id==="ai")renderChat();window.scrollTo({top:0,behavior:"smooth"})}
 
-let sb=null;
+
 let sbSession=null;
 let syncTimer=null;
 let syncing=false;
-let realtimeChannel=null;
 let applyingRemote=false;
-const DEVICE_KEY="ai_cse_device_id_v5";
+let pollTimer=null;
+const DEVICE_KEY="brainmaxxing_device_id_v7";
 let deviceId=localStorage.getItem(DEVICE_KEY);
-if(!deviceId){deviceId=crypto.randomUUID?crypto.randomUUID():("dev-"+Math.random().toString(36).slice(2));localStorage.setItem(DEVICE_KEY,deviceId);}
-
-function sbConfigured(){
-  return !!(data.settings?.supabaseUrl && data.settings?.supabaseKey);
+if(!deviceId){
+  deviceId=(crypto.randomUUID?crypto.randomUUID():("dev-"+Math.random().toString(36).slice(2)+Date.now()));
+  localStorage.setItem(DEVICE_KEY,deviceId);
 }
-function initSupabase(){
-  if(!sbConfigured() || !window.supabase) return false;
-  try{
-    sb = window.supabase.createClient(data.settings.supabaseUrl.trim(), data.settings.supabaseKey.trim(), {
-      auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
-    });
-    sb.auth.onAuthStateChange((_event, session)=>{
-      sbSession=session;
-      renderSettings();
-      if(session){ if(typeof pullCloud==="function") pullCloud(false); if(typeof startRealtime==="function") startRealtime(); } else if(typeof stopRealtime==="function") stopRealtime();
-    });
-    sb.auth.getSession().then(({data:sd})=>{
-      sbSession=sd.session;
-      renderSettings();
-      if(sbSession){ if(typeof pullCloud==="function") pullCloud(false); if(typeof startRealtime==="function") startRealtime(); }
-    });
-    return true;
-  }catch(e){return false}
+
+function sbConfigured(){return !!(data.settings?.supabaseUrl && data.settings?.supabaseKey)}
+function sbBase(){return (data.settings.supabaseUrl||"").replace(/\/+$/,"")}
+function sbHeaders(token){
+  return {
+    "Content-Type":"application/json",
+    "apikey":data.settings.supabaseKey,
+    ...(token?{"Authorization":"Bearer "+token}:{})
+  };
+}
+function sbSaveSession(session){
+  sbSession=session||null;
+  if(session)localStorage.setItem("brainmaxxing_auth_session_v7",JSON.stringify(session));
+  else localStorage.removeItem("brainmaxxing_auth_session_v7");
+}
+function sbLoadSession(){
+  try{sbSession=JSON.parse(localStorage.getItem("brainmaxxing_auth_session_v7")||"null")}catch(e){sbSession=null}
+  return sbSession;
 }
 function saveSupabaseConfig(){
   const url=document.getElementById("sbUrl").value.trim();
   const key=document.getElementById("sbKey").value.trim();
   const status=document.getElementById("sbConnection");
-  if(!url || !key){
+  if(!url||!key){
     status.textContent="Enter both the Project URL and Publishable key.";
     status.className="notice warn";
     showToast("Missing Supabase URL or key");
     return;
   }
-  data.settings.supabaseUrl=url;
-  data.settings.supabaseKey=key;
-  try{
-    localStorage.setItem(KEY,JSON.stringify(data));
-  }catch(e){
-    status.textContent="Browser storage is blocked: "+e.message;
+  if(!/^https:\/\/[^\\s]+\\.supabase\\.co$/i.test(url) && !/^https?:\\/\\//i.test(url)){
+    status.textContent="The Project URL should start with https://";
     status.className="notice warn";
     return;
   }
-  const ready=initSupabase();
-  status.textContent=ready
-    ? "✅ Supabase configured. You can now create/sign in to your account."
-    : "✅ Connection details saved. Supabase library is not loaded yet; refresh this page and try again.";
+  data.settings.supabaseUrl=url;
+  data.settings.supabaseKey=key;
+  saveLocalOnly();
+  status.textContent="✅ Supabase connection details saved. You can now create or sign in to your cloud account.";
   status.className="notice success";
   showToast("Supabase connection saved");
 }
+function saveLocalOnly(){localStorage.setItem(KEY,JSON.stringify(data))}
+async function sbFetch(path,options={}){
+  const r=await fetch(sbBase()+path,{...options,headers:{...sbHeaders(sbSession?.access_token),...(options.headers||{})}});
+  let body=null; try{body=await r.json()}catch(e){}
+  if(!r.ok) throw new Error(body?.msg||body?.message||body?.error_description||body?.error?.message||("HTTP "+r.status));
+  return body;
+}
 async function signUpAccount(){
-  if(!initSupabase()) return showToast("Save Supabase connection first");
+  if(!sbConfigured())return showToast("Save Supabase connection first");
   const email=document.getElementById("authEmail").value.trim();
   const password=document.getElementById("authPassword").value;
   if(!email||!password)return showToast("Enter email and password");
-  const {error}=await sb.auth.signUp({email,password});
-  if(error){document.getElementById("authStatus").textContent="Signup error: "+error.message;return}
-  document.getElementById("authStatus").textContent="Account created. Check your email if verification is required, then sign in.";
+  try{
+    const body=await sbFetch("/auth/v1/signup",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({email,password})
+    });
+    if(body?.access_token)sbSaveSession(body);
+    const text=body?.access_token
+      ?"✅ Account created and signed in. Upload your device to the cloud."
+      :"✅ Account created. Check your email if confirmation is enabled, then use Sign in.";
+    document.getElementById("authStatus").textContent=text;
+    renderSettings(); if(sbSession)startPolling();
+  }catch(e){document.getElementById("authStatus").textContent="Signup error: "+e.message}
 }
 async function signInAccount(){
-  if(!initSupabase()) return showToast("Save Supabase connection first");
+  if(!sbConfigured())return showToast("Save Supabase connection first");
   const email=document.getElementById("authEmail").value.trim();
   const password=document.getElementById("authPassword").value;
-  const {data:res,error}=await sb.auth.signInWithPassword({email,password});
-  if(error){document.getElementById("authStatus").textContent="Sign-in error: "+error.message;return}
-  sbSession=res.session; document.getElementById("authStatus").textContent="Signed in as "+res.user.email;
-  await pullCloud(true);
+  if(!email||!password)return showToast("Enter email and password");
+  try{
+    const body=await sbFetch("/auth/v1/token?grant_type=password",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({email,password})
+    });
+    sbSaveSession(body);
+    document.getElementById("authStatus").textContent="✅ Signed in as "+(body.user?.email||email);
+    renderSettings(); await downloadCloud(false); startPolling(); showToast("Signed in");
+  }catch(e){document.getElementById("authStatus").textContent="Sign-in error: "+e.message}
 }
 async function signOutAccount(){
-  if(sb) await sb.auth.signOut();
-  sbSession=null; renderSettings(); showToast("Signed out");
+  try{if(sbSession&&sbConfigured())await sbFetch("/auth/v1/logout",{method:"POST"})}catch(e){}
+  sbSaveSession(null); stopPolling(); renderSettings(); showToast("Signed out");
 }
 function syncPayload(){
   const copy=JSON.parse(JSON.stringify(data));
   if(copy.settings){copy.settings.supabaseKey="";copy.settings.appToken="";}
-  copy.__sync={deviceId};
+  copy.__sync={deviceId,clientVersion:"v7"};
   return copy;
 }
 function mergeCloudToLocal(cloud){
   if(!cloud)return false;
-  const local=data;
-  const savedSettings=data.settings;
+  const savedSettings={...data.settings};
   data=cloud;
-  data.settings={...(data.settings||{}),supabaseUrl:savedSettings.supabaseUrl,supabaseKey:savedSettings.supabaseKey,mode:savedSettings.mode,backendUrl:savedSettings.backendUrl,appToken:savedSettings.appToken,provider:savedSettings.provider};
-  ensure(); return true;
+  data.settings={...(data.settings||{}),
+    supabaseUrl:savedSettings.supabaseUrl||"",
+    supabaseKey:savedSettings.supabaseKey||"",
+    mode:savedSettings.mode||"smart",
+    backendUrl:savedSettings.backendUrl||"",
+    appToken:savedSettings.appToken||"",
+    provider:savedSettings.provider||"gemini"};
+  ensure();
+  return true;
 }
 async function uploadCloud(show=true){
   if(!sbSession)return showToast("Sign in first");
-  if(syncing || applyingRemote)return;
+  if(syncing||applyingRemote)return;
   syncing=true; setSyncText("☁ Uploading…");
   try{
     const payload=syncPayload();
-    const {data:row,error}=await sb.from("user_states")
-      .upsert({user_id:sbSession.user.id,state:payload,device_id:deviceId,updated_at:new Date().toISOString()},{onConflict:"user_id"})
-      .select("updated_at")
-      .single();
-    if(error)throw error;
-    data.__cloudUpdatedAt=row?.updated_at||null;
-    localStorage.setItem(KEY,JSON.stringify(data));
-    setSyncText("☁ Live sync on · uploaded "+new Date().toLocaleTimeString());
+    const row=await sbFetch("/rest/v1/user_states?on_conflict=user_id",{
+      method:"POST",
+      headers:{"Prefer":"resolution=merge-duplicates,return=representation"},
+      body:JSON.stringify({user_id:sbSession.user.id,state:payload,device_id:deviceId,updated_at:new Date().toISOString()})
+    });
+    data.__cloudUpdatedAt=row?.[0]?.updated_at||new Date().toISOString();
+    saveLocalOnly();
+    setSyncText("☁ Sync on · uploaded "+new Date().toLocaleTimeString());
     if(show)showToast("Uploaded to cloud");
   }catch(e){setSyncText("Upload failed: "+e.message)}
   finally{syncing=false}
@@ -333,84 +358,63 @@ async function downloadCloud(show=true){
   if(syncing)return;
   syncing=true; setSyncText("☁ Downloading…");
   try{
-    const {data:row,error}=await sb.from("user_states")
-      .select("state,updated_at,device_id")
-      .eq("user_id",sbSession.user.id).maybeSingle();
-    if(error)throw error;
-    if(!row){setSyncText("☁ No cloud copy yet. Upload this device first.");return}
-    applyingRemote=true;
-    const savedSettings=data.settings;
-    data=row.state;
-    data.settings={...(data.settings||{}),
-      supabaseUrl:savedSettings?.supabaseUrl||"",
-      supabaseKey:savedSettings?.supabaseKey||"",
-      mode:savedSettings?.mode||"smart",
-      backendUrl:savedSettings?.backendUrl||"",
-      appToken:savedSettings?.appToken||"",
-      provider:savedSettings?.provider||"gemini"};
-    data.__cloudUpdatedAt=row.updated_at||null;
-    ensure();
-    localStorage.setItem(KEY,JSON.stringify(data));
-    applyingRemote=false;
-    render();
-    setSyncText("☁ Live sync on · downloaded "+new Date().toLocaleTimeString());
-    if(show)showToast("Cloud copy loaded");
-  }catch(e){applyingRemote=false;setSyncText("Download failed: "+e.message)}
+    const rows=await sbFetch("/rest/v1/user_states?select=state,updated_at,device_id&user_id=eq."+encodeURIComponent(sbSession.user.id)+"&limit=1",{method:"GET"});
+    const row=rows?.[0];
+    if(!row){setSyncText("☁ No cloud copy yet. Upload this device first.");return false}
+    if(row.device_id!==deviceId || !data.__cloudUpdatedAt || new Date(row.updated_at)>new Date(data.__cloudUpdatedAt||0)){
+      applyingRemote=true;
+      mergeCloudToLocal(row.state);
+      data.__cloudUpdatedAt=row.updated_at||null;
+      saveLocalOnly();
+      applyingRemote=false;
+      render();
+    }
+    setSyncText("☁ Sync on · checked "+new Date().toLocaleTimeString());
+    if(show)showToast("Cloud state loaded");
+    return true;
+  }catch(e){setSyncText("Download failed: "+e.message);return false}
   finally{syncing=false}
 }
 async function syncNow(){
   if(!sbSession)return showToast("Sign in first");
   await downloadCloud(false);
   await uploadCloud(false);
-  setSyncText("☁ Live sync on · synced "+new Date().toLocaleTimeString());
+  setSyncText("☁ Sync on · "+new Date().toLocaleTimeString());
   showToast("Synced");
 }
-function startRealtime(){
-  if(!sb || !sbSession)return;
-  stopRealtime();
-  realtimeChannel=sb.channel("user-state-sync-"+sbSession.user.id)
-    .on("postgres_changes",
-      {event:"UPDATE",schema:"public",table:"user_states",filter:`user_id=eq.${sbSession.user.id}`},
-      payload=>{
-        const row=payload.new;
-        if(!row || row.device_id===deviceId || !row.state || applyingRemote)return;
-        applyingRemote=true;
-        try{
-          const savedSettings=data.settings;
-          data=row.state;
-          data.settings={...(data.settings||{}),
-            supabaseUrl:savedSettings?.supabaseUrl||"",
-            supabaseKey:savedSettings?.supabaseKey||"",
-            mode:savedSettings?.mode||"smart",
-            backendUrl:savedSettings?.backendUrl||"",
-            appToken:savedSettings?.appToken||"",
-            provider:savedSettings?.provider||"gemini"};
-          data.__cloudUpdatedAt=row.updated_at||null;
-          localStorage.setItem(KEY,JSON.stringify(data));
-          applyingRemote=false;
-          render();
-          setSyncText("☁ Updated from your other device · "+new Date().toLocaleTimeString());
-          showToast("Synced from other device");
-        }catch(e){
-          applyingRemote=false;
-          setSyncText("Realtime update failed: "+e.message);
-        }
-      })
-    .subscribe(status=>{
-      if(status==="SUBSCRIBED")setSyncText("☁ Live sync on");
-      if(status==="CHANNEL_ERROR")setSyncText("Live sync connection error — refresh to retry.");
-    });
-}
-function stopRealtime(){
-  if(realtimeChannel && sb){sb.removeChannel(realtimeChannel);}
-  realtimeChannel=null;
-}
-
 function scheduleAutoSync(){
-  if(!sbSession || applyingRemote)return;
+  if(!sbSession||applyingRemote)return;
   clearTimeout(syncTimer);
   syncTimer=setTimeout(()=>uploadCloud(false),1200);
 }
+async function pollCloud(){
+  if(!sbSession||syncing||applyingRemote)return;
+  try{
+    const rows=await sbFetch("/rest/v1/user_states?select=state,updated_at,device_id&user_id=eq."+encodeURIComponent(sbSession.user.id)+"&limit=1",{method:"GET"});
+    const row=rows?.[0]; if(!row)return;
+    const cloudTime=new Date(row.updated_at||0).getTime();
+    const localTime=new Date(data.__cloudUpdatedAt||0).getTime();
+    if(row.device_id!==deviceId && cloudTime>localTime){
+      applyingRemote=true;
+      const settings={...data.settings}; data=row.state;
+      data.settings={...(data.settings||{}),
+        supabaseUrl:settings.supabaseUrl||"",
+        supabaseKey:settings.supabaseKey||"",
+        mode:settings.mode||"smart",backendUrl:settings.backendUrl||"",
+        appToken:settings.appToken||"",provider:settings.provider||"gemini"};
+      data.__cloudUpdatedAt=row.updated_at;
+      saveLocalOnly(); applyingRemote=false; render();
+      setSyncText("☁ Updated from your other device · "+new Date().toLocaleTimeString());
+      showToast("Synced from other device");
+    }
+  }catch(e){}
+}
+function startPolling(){
+  stopPolling();
+  pollCloud();
+  pollTimer=setInterval(pollCloud,5000);
+}
+function stopPolling(){if(pollTimer)clearInterval(pollTimer);pollTimer=null}
 function setSyncText(s){const el=document.getElementById("syncStatus");if(el)el.textContent=s}
 
 function render(){ensure();renderDashboard();renderWeek();renderRoadmap();renderProjects();renderSettings();renderChat()}
@@ -446,12 +450,14 @@ function renderSettings(){
   document.getElementById("provider").value=data.settings.provider;
   document.getElementById("target30").value=data.target30;
   document.getElementById("bigTarget").value=data.bigTarget;
-  document.getElementById("sbUrl").value=data.settings.supabaseUrl||"";
-  document.getElementById("sbKey").value=data.settings.supabaseKey||"";
+  const su=document.getElementById("sbUrl"), sk=document.getElementById("sbKey");
+  if(su)su.value=data.settings.supabaseUrl||""; if(sk)sk.value=data.settings.supabaseKey||"";
   document.getElementById("aiStatus").textContent=data.settings.mode==="backend"&&data.settings.backendUrl?"Connected AI":"Free Smart Mode";
   document.getElementById("connectionResult").textContent=data.settings.backendUrl?"Backend configured. Test it to verify connectivity.":"No backend configured — Free Smart Mode is active.";
-  document.getElementById("sbConnection").textContent=sbConfigured()?"Supabase configured.":"Cloud sync is not configured yet.";
-  document.getElementById("authStatus").textContent=sbSession?.user?.email?("Signed in as "+sbSession.user.email):"Not signed in.";
+  document.getElementById("sbConnection").textContent=sbConfigured()?"✅ Supabase configured.":"Cloud sync is not configured yet.";
+  document.getElementById("sbConnection").className=sbConfigured()?"notice success":"notice";
+  document.getElementById("authStatus").textContent=sbSession?.user?.email?("✅ Signed in as "+sbSession.user.email):"Not signed in.";
+  if(sbSession)setSyncText("☁ Sync on");
 }
 function saveSettings(){data.settings={mode:document.getElementById("aiMode").value,backendUrl:document.getElementById("backendUrl").value.trim(),appToken:document.getElementById("appToken").value.trim(),provider:document.getElementById("provider").value};save();renderSettings()}
 function savePersonal(){data.target30=document.getElementById("target30").value.trim();data.bigTarget=document.getElementById("bigTarget").value.trim();save();showToast("Targets saved")}
