@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#090d13">
+<meta name="description" content="Personal AI + CSE learning command center">
+<link rel="manifest" href="manifest.json">
+<title>brainMAXXING</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--bg:#090d13;--panel:#101720;--panel2:#151e29;--text:#eef4fa;--muted:#8ea0b4;--border:#243345;--accent:#7c5cff;--green:#31d0aa;--red:#ff607d;--yellow:#ffc857}
+*{box-sizing:border-box}html{background:var(--bg)}body{margin:0;background:radial-gradient(circle at 80% -10%,#1c1740 0,#090d13 35%);color:var(--text);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
+button,input,textarea,select{font:inherit}button{cursor:pointer}.app{max-width:1200px;margin:auto;padding:15px}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:7px 0 14px}.brand h1{font-size:27px;letter-spacing:-.8px;margin:0}.brand p{margin:6px 0 0;color:var(--muted);font-size:12px;line-height:1.45;max-width:650px}.actions{display:flex;flex-wrap:wrap;gap:7px}
+.btn{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:10px;padding:9px 11px}.btn:hover{background:var(--panel2)}.btn.primary{background:var(--accent);border-color:var(--accent)}.btn.good{background:#11372f;border-color:#1c614f}.btn.danger{color:#ff9aae}.btn.small{font-size:11px;padding:6px 8px}.btn:disabled{opacity:.5;cursor:not-allowed}
+.nav{position:sticky;top:0;z-index:5;background:rgba(9,13,19,.9);backdrop-filter:blur(12px);display:flex;gap:6px;overflow:auto;padding:8px 0 10px}.nav button{white-space:nowrap;border:1px solid var(--border);background:transparent;color:var(--muted);border-radius:999px;padding:8px 12px}.nav button.active{color:var(--text);background:var(--panel2);border-color:#44566b}
+.view{display:none}.view.active{display:block}.grid{display:grid;grid-template-columns:1.25fr .75fr;gap:14px}.card{background:rgba(16,23,32,.96);border:1px solid var(--border);border-radius:16px;padding:15px;margin-bottom:14px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.stat{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:12px}.stat .num{font-weight:850;font-size:22px}.stat .lab{font-size:10px;color:var(--muted);margin-top:3px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}.stack{display:grid;gap:10px}.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.progress{height:9px;border-radius:99px;background:#1c2733;overflow:hidden}.progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--green));border-radius:99px}
+.badge{font-size:10px;color:#b9c8d8;background:#16212c;border:1px solid #2a3a4c;padding:3px 7px;border-radius:999px}.muted{color:var(--muted)}.tiny{font-size:11px}
+.focus{border-left:3px solid var(--green);padding-left:12px}.focusTitle{font-weight:850;font-size:18px}.focusText{font-size:12px;line-height:1.45;color:var(--muted);margin-top:4px}
+.goal{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}.goal:last-child{border-bottom:0}.goal input{width:18px;height:18px;accent-color:var(--green)}.goal.done .goaltext{color:#738398;text-decoration:line-through}
+.phase{border:1px solid var(--border);border-radius:13px;overflow:hidden;background:#0d141c;margin:9px 0}.phasehead{display:flex;gap:10px;align-items:center;padding:12px;cursor:pointer}.phaseNum{width:31px;height:31px;border-radius:9px;background:#1d2332;color:#c8bdff;display:grid;place-items:center;font-weight:800}.phasebody{display:none;border-top:1px solid var(--border);padding:8px 12px}.phase.open .phasebody{display:block}.chev{color:var(--muted);font-size:18px}.phase.open .chev{transform:rotate(90deg)}
+.task{display:grid;grid-template-columns:auto 1fr auto;gap:9px;padding:10px 0;border-bottom:1px dashed #253241;align-items:start}.task:last-child{border-bottom:0}.task input{margin-top:4px;width:17px;height:17px;accent-color:var(--green)}.task.done .tt{color:#708196;text-decoration:line-through}.tt{font-weight:650;font-size:13px}.td{color:var(--muted);font-size:11px;line-height:1.4;margin-top:3px}
+.project{background:var(--panel2);border:1px solid var(--border);border-radius:13px;padding:12px}.projectTitle{font-weight:850}.projectMeta{font-size:11px;color:var(--muted);margin:4px 0 8px}.projectBtns{display:flex;gap:6px;flex-wrap:wrap}
+.field{display:grid;gap:5px}.field label{font-size:11px;color:var(--muted)}input[type=text],input[type=number],textarea,select{width:100%;border:1px solid var(--border);background:#0b1118;color:var(--text);border-radius:10px;padding:10px;outline:none}textarea{resize:vertical;min-height:140px}
+.chat{display:grid;gap:10px}.messages{min-height:270px;max-height:55vh;overflow:auto;background:#0b1118;border:1px solid var(--border);border-radius:13px;padding:11px}.msg{max-width:92%;padding:9px 11px;border-radius:12px;margin:7px 0;white-space:pre-wrap;line-height:1.45;font-size:12px}.msg.user{margin-left:auto;background:#2a2352}.msg.ai{background:#15212c;border:1px solid #253749}.msg.system{background:#17251f;color:#a8dacb}.composer{display:grid;grid-template-columns:1fr auto;gap:8px}.composer textarea{min-height:70px}.install{display:none}.install.show{display:block}.notice{padding:10px;border-radius:10px;background:#1a2029;border:1px solid var(--border);font-size:11px;line-height:1.45}.success{background:#10251f;border-color:#205544}.warn{background:#282114;border-color:#54451e}.empty{text-align:center;color:var(--muted);border:1px dashed var(--border);padding:20px;border-radius:11px}
+.modalbg{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.7);backdrop-filter:blur(5px);padding:14px;z-index:20}.modalbg.show{display:flex}.modal{width:min(700px,100%);max-height:90vh;overflow:auto;background:#111821;border:1px solid var(--border);border-radius:16px;padding:15px}
+@media(max-width:880px){.grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}@media(max-width:560px){.app{padding:11px}header{flex-direction:column}.actions{justify-content:flex-start}.two{grid-template-columns:1fr}.composer{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div class="brand"><h1>brainMAXXING</h1><p>One place to learn, build, track, publish and eventually earn — with an AI copilot when you connect one.</p></div>
+  <div class="actions"><button class="btn" onclick="exportData()">Export</button><button class="btn" onclick="document.getElementById('importFile').click()">Import</button><input id="importFile" hidden type="file" accept=".json" onchange="importData(event)"></div>
+</header>
+
+<div id="installCard" class="card install">
+  <div class="row"><div><b>Install it on this device</b><div class="tiny muted">This is a PWA. Use your browser's install option.</div></div><button class="btn primary small" onclick="installPWA()">Install</button></div>
+</div>
+
+<nav class="nav">
+<button data-view="dashboard" class="active" onclick="showView('dashboard')">Dashboard</button>
+<button data-view="week" onclick="showView('week')">Weekly</button>
+<button data-view="roadmap" onclick="showView('roadmap')">Roadmap</button>
+<button data-view="projects" onclick="showView('projects')">Projects</button>
+<button data-view="ai" onclick="showView('ai')">AI Copilot</button>
+<button data-view="settings" onclick="showView('settings')">Settings</button>
+</nav>
+
+<section id="dashboard" class="view active">
+  <div class="stats">
+    <div class="stat"><div class="num" id="overall">0%</div><div class="lab">Roadmap progress</div></div>
+    <div class="stat"><div class="num" id="xp">0 XP</div><div class="lab">XP</div></div>
+    <div class="stat"><div class="num" id="streak">0 🔥</div><div class="lab">Day streak</div></div>
+    <div class="stat"><div class="num" id="level">Level 1</div><div class="lab">Current level</div></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="row"><div><h2 style="margin:0">Today's mission</h2><div class="tiny muted" id="dateLabel"></div></div><button class="btn primary small" onclick="planTodayModal()">Plan my day</button></div>
+    <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+    <div class="focus"><div class="focusTitle" id="focusTitle">Loading…</div><div class="focusText" id="focusText"></div>
+      <div class="actions" style="margin-top:9px"><button class="btn good small" onclick="completeFocus()">Mark complete</button><button class="btn small" onclick="showView('ai')">Ask AI</button></div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="row"><h3>Today checklist</h3><span class="badge" id="todayBadge">0/0</span></div><div class="progress" style="margin-top:9px"><i id="todayBar"></i></div><div id="todayList" style="margin-top:6px"></div></div>
+    <div class="card"><h3>Weekly pulse</h3><div class="tiny muted" style="margin-top:4px">Goals + hours</div><div style="font-size:23px;font-weight:850;margin-top:12px" id="weekGoalPct">0%</div><div class="progress" style="margin-top:7px"><i id="weekGoalBar"></i></div><div class="tiny muted" style="margin-top:7px" id="weekHoursText"></div><hr style="border:0;border-top:1px solid var(--border);margin:12px 0"><div class="streakText" id="streakText"></div></div>
+  </div>
+</section>
+
+<section id="week" class="view">
+  <div class="card"><div class="row"><div><h2>This week</h2><div class="tiny muted" id="weekRange"></div></div><button class="btn primary" onclick="addWeeklyGoal()">+ Goal</button></div>
+    <div id="weeklyGoals" style="margin-top:9px"></div>
+    <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
+    <div class="two"><div class="field"><label>Study target (hours)</label><input id="hoursTarget" type="number" min="1" max="100"></div><div><div class="tiny muted">Logged</div><div style="font-weight:850;font-size:22px;margin-top:3px" id="hoursLabel">0 / 10h</div><div class="progress" style="margin-top:7px"><i id="hoursBar"></i></div></div></div>
+    <div class="actions" style="margin-top:9px"><button class="btn small" onclick="logHours(.5)">+ 30 min</button><button class="btn small" onclick="logHours(1)">+ 1 hour</button><button class="btn danger small" onclick="resetWeek()">Reset this week</button></div>
+  </div>
+</section>
+
+<section id="roadmap" class="view">
+  <div class="card"><div class="row"><div><h2>Roadmap</h2><div class="tiny muted">Every item is editable. Add things when your direction changes.</div></div><button class="btn primary" onclick="openTaskModal()">+ Task</button></div><div id="roadmapList" style="margin-top:10px"></div></div>
+</section>
+
+<section id="projects" class="view">
+  <div class="card"><div class="row"><div><h2>Project Lab</h2><div class="tiny muted">This is where learning turns into portfolio proof.</div></div><button class="btn primary" onclick="openProjectModal()">+ Project</button></div><div id="projectsList" class="stack" style="margin-top:10px"></div></div>
+</section>
+
+<section id="ai" class="view">
+  <div class="card">
+    <div class="row"><div><h2>AI Copilot</h2><div class="tiny muted">Ask about your roadmap, projects, study plan or earning track.</div></div><span class="badge" id="aiStatus">Free Smart Mode</span></div>
+    <div class="notice" style="margin-top:10px">Without an API connection, the built-in planner still works and uses your tracked data. For answers from an external model inside this app, connect a backend in Settings. Your OpenAI key must stay server-side; OpenAI explicitly advises not putting API keys in browser/mobile apps. <span class="tiny">citeturn839090search0</span></div>
+  </div>
+  <div class="card chat">
+    <div id="messages" class="messages"></div>
+    <div class="actions">
+      <button class="btn small" onclick="askPreset('What should I focus on this week?')">Weekly focus</button>
+      <button class="btn small" onclick="askPreset('Review my projects and tell me which one I should push next, with reasons.')">Review projects</button>
+      <button class="btn small" onclick="askPreset('Make me a 7-day study plan based on my current roadmap progress.')">7-day plan</button>
+      <button class="btn small" onclick="copyContextPrompt()">Copy context for ChatGPT</button>
+    </div>
+    <div class="composer"><textarea id="chatInput" placeholder="Example: I only have 2 hours tonight and low energy. What should I do?"></textarea><button class="btn primary" onclick="sendAI()">Send</button></div>
+  </div>
+</section>
+
+<section id="settings" class="view">
+  <div class="card">
+    <h2>☁️ Cloud sync</h2>
+    <p class="tiny muted">Sign in with the same account on your laptop and phone. Your roadmap, goals, projects, XP, notes and targets can then sync through your Supabase database.</p>
+    <div class="notice warn" style="margin-top:10px"><b>One-time setup:</b> create a free Supabase project, run the SQL file that came with this app, then paste your project's URL and publishable key below. Never paste a Supabase service-role key here.</div>
+    <div class="stack" style="margin-top:10px">
+      <div class="field"><label>Supabase Project URL</label><input id="sbUrl" type="text" placeholder="https://xxxxxxxx.supabase.co"></div>
+      <div class="field"><label>Supabase Publishable / anon key</label><input id="sbKey" type="text" placeholder="eyJ..."></div>
+      <button class="btn primary" onclick="saveSupabaseConfig()">Save connection</button>
+      <button class="btn small" onclick="location.reload()">Refresh app</button>
+      <div id="sbConnection" class="notice">Cloud sync is not configured yet.</div>
+    </div>
+    <hr style="border:0;border-top:1px solid var(--border);margin:14px 0">
+    <h3>Account</h3>
+    <div class="stack" style="margin-top:10px">
+      <div class="field"><label>Email</label><input id="authEmail" type="text" placeholder="you@example.com"></div>
+      <div class="field"><label>Password</label><input id="authPassword" type="password" placeholder="Use a strong password"></div>
+      <div class="actions">
+        <button class="btn primary" onclick="signUpAccount()">Create account</button>
+        <button class="btn" onclick="signInAccount()">Sign in</button>
+        <button class="btn danger" onclick="signOutAccount()">Sign out</button>
+      </div>
+      <div id="authStatus" class="notice">Not signed in.</div>
+    </div>
+    <hr style="border:0;border-top:1px solid var(--border);margin:14px 0">
+    <div class="actions">
+      <button class="btn good" onclick="uploadCloud()">☁️ Upload this device → cloud</button>
+      <button class="btn" onclick="downloadCloud()">☁️ Download cloud → this device</button>
+      <button class="btn primary" onclick="syncNow()">↕ Sync now</button>
+    </div>
+    <div id="syncStatus" class="tiny muted" style="margin-top:8px">No sync performed.</div>
+  </div>
+
+  <div class="card">
+    <h2>AI connection</h2>
+    <p class="tiny muted">Use Free Smart Mode for ₹0. Or connect a secure backend later for real model responses inside this app.</p>
+    <div class="stack" style="margin-top:10px">
+      <div class="field"><label>Mode</label><select id="aiMode" onchange="saveSettings()"><option value="smart">Free Smart Mode</option><option value="backend">Connected AI Backend</option></select></div>
+      <div class="field"><label>Backend URL</label><input id="backendUrl" type="text" placeholder="https://your-worker.workers.dev/api/chat"></div>
+      <div class="field"><label>App access token (optional)</label><input id="appToken" type="text" placeholder="Private app token"></div>
+      <div class="field"><label>Provider requested by backend</label><select id="provider"><option value="gemini">Gemini</option><option value="openai">OpenAI</option></select></div>
+      <button class="btn primary" onclick="saveSettings();testAI()">Save + test connection</button>
+      <div id="connectionResult" class="notice">No backend configured.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Personal targets</h2>
+    <div class="stack" style="margin-top:10px">
+      <div class="field"><label>Next 30 days</label><input id="target30" type="text"></div>
+      <div class="field"><label>Big target</label><input id="bigTarget" type="text"></div>
+      <button class="btn primary" onclick="savePersonal()">Save targets</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Data</h2>
+    <p class="tiny muted">Your local browser copy remains available. Export a JSON backup whenever you want an offline copy.</p>
+  </div>
+</section>
+
+<footer class="tiny muted" style="text-align:center;padding:3px 0 15px">Progress is stored locally and can sync to your account when cloud sync is configured. Export a backup before changing devices.</footer>
+</div>
+
+<div id="modalbg" class="modalbg" onclick="modalBgClick(event)"><div class="modal" onclick="event.stopPropagation()"><h3 id="modalTitle" style="margin-top:0">Modal</h3><div id="modalForm"></div><div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveModal()">Save</button></div></div></div>
+<div id="toast" style="position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:30;display:none;background:#17232f;border:1px solid #344960;border-radius:10px;padding:9px 12px;font-size:12px"></div>
+
+<script>
+const KEY="ai_cse_command_center_v3";
+const phaseSeed=[
+["Python from Zero","Weeks 1–5","Python"],["Git + GitHub","Weeks 1–6","Git/GitHub"],["DSA + CS Fundamentals","Months 2–4","DSA"],["Web Development","Months 3–5","Web"],["Backend + Databases","Months 4–6","Backend"],["Machine Learning","Months 6–7","ML"],["Deep Learning + PyTorch","Months 7–8","Deep Learning"],["LLMs + Generative AI","Months 8–10","LLM"],["AI Agents + Automation","Months 10–11","Agents"],["Production + Portfolio","Months 11–12+","Career"]];
+const taskSeed=[
+["Python from Zero",["Python syntax, variables and data types","Conditionals and loops","Lists, tuples, sets and dictionaries","Functions and modules","Exceptions and file handling","Python OOP","pip + virtual environments","Project: Calculator","Project: Quiz game","Project: Expense tracker CLI","Project: File organizer","Project: Student management system"]],
+["Git + GitHub",["Create GitHub account + profile","Learn repositories","Learn core Git commands","Branches and merging","Write useful README files","Upload your first Python project","Learn basic pull requests/issues"]],
+["DSA + CS Fundamentals",["Arrays and strings","Linked lists","Stacks and queues","Hash maps / hash sets","Recursion","Sorting + searching","Trees / BST / heaps","Graphs","Dynamic programming basics","SQL fundamentals","Linux basics","Review OOP / OS / DBMS / networking"]],
+["Web Development",["HTML","CSS","JavaScript basics","HTTP + REST + JSON","Build a personal portfolio website","Project: Movie search app","React fundamentals","Project: College notes site"]],
+["Backend + Databases",["FastAPI basics","CRUD APIs","PostgreSQL + SQL","Authentication basics","Connect frontend + backend","Project: Full-stack expense tracker","Deploy one application"]],
+["Machine Learning",["NumPy basics","Pandas basics","Matplotlib","Regression","Classification","Train/validation/test","Overfitting + underfitting","Precision/recall/F1/confusion matrix","Project: House price predictor","Project: Spam classifier","Project: Recommendation system"]],
+["Deep Learning + PyTorch",["Neural networks","Loss + gradient descent","Backpropagation","PyTorch tensors + datasets","Train a small neural network","CNN basics","Embeddings"]],
+["LLMs + Generative AI",["Tokens + context windows","Transformers + attention","Prompt design","Use an LLM API","Structured outputs","Tool/function calling","Embeddings + semantic search","RAG architecture","Vector database basics","Project: College PDF AI"]],
+["AI Agents + Automation",["Tool-using agents","State + memory","Workflows vs autonomous agents","Evaluation","Guardrails + error handling","Project: AI study agent","Project: Business automation agent"]],
+["Production + Portfolio",["Testing basics","Docker basics","Security basics","Logging + monitoring basics","Polish 5 portfolio projects","Create portfolio site","Create LinkedIn profile","Publish project write-ups","Apply for internships","Start freelancing/outreach","Build a small product/SaaS"]]
+];
+function uid(){return Math.random().toString(36).slice(2,9)}
+function iso(d=new Date()){return d.toISOString().slice(0,10)}
+function monday(d=new Date()){d=new Date(d);let day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+function seed(){let phases=phaseSeed.map((p,i)=>({id:"p"+(i+1),title:p[0],timeframe:p[1],focus:"Learn this, then use it in a small build.",open:i===0,tasks:[]}));for(const [title,items] of taskSeed){let p=phases.find(x=>x.title===title);p.tasks=items.map(x=>({id:uid(),title:x,details:"Learn → code → test → explain.",tags:[p.focus],done:false,weekly:false,lastCompleted:null}))};return{version:3,phases,projects:[{id:uid(),title:"College AI Assistant",status:"Idea",stack:"Python, FastAPI, React, RAG",notes:"Question-answering over college notes/PDFs with citations.",next:"Start Python"},{id:uid(),title:"AI Study Agent",status:"Planned",stack:"Python, LLM, tools",notes:"Syllabus → study plan → quizzes → weak-topic tracking.",next:"Finish API basics"},{id:uid(),title:"Business Automation System",status:"Idea",stack:"Python, APIs, AI, database",notes:"Lead extraction, classification, follow-ups and dashboard.",next:"Find one repetitive business workflow"}],xp:0,completedDates:[],daily:{},week:{start:iso(monday()),hours:0,target:10,goals:[{id:uid(),text:"Study 5 focused sessions",done:false},{id:uid(),text:"Ship/improve one project",done:false},{id:uid(),text:"Push meaningful work to GitHub",done:false}]},notes:"",target30:"",bigTarget:"",settings:{mode:"smart",backendUrl:"",appToken:"",provider:"gemini",supabaseUrl:"",supabaseKey:""},chat:[]}}
+let data;try{data=JSON.parse(localStorage.getItem(KEY))||seed()}catch(e){data=seed()}
+function save(){localStorage.setItem(KEY,JSON.stringify(data));scheduleAutoSync()}
+function ensure(){
+  if(!data.version)data=seed();
+  if(!data.settings)data.settings={mode:"smart",backendUrl:"",appToken:"",provider:"gemini",supabaseUrl:"",supabaseKey:""};
+  data.settings.supabaseUrl ??=""; data.settings.supabaseKey ??="";
+  if(!data.chat)data.chat=[]; if(!data.daily)data.daily={};
+  if(data.week.start!==iso(monday()))data.week={start:iso(monday()),hours:0,target:data.week.target||10,goals:[
+    {id:uid(),text:"Study 5 focused sessions",done:false},
+    {id:uid(),text:"Ship/improve one project",done:false},
+    {id:uid(),text:"Push meaningful work to GitHub",done:false}
+  ]};
+  save();
+}
+ensure()
+function tasks(){return data.phases.flatMap(p=>p.tasks.map(t=>({...t,phaseId:p.id,phaseTitle:p.title})))}function task(id){for(const p of data.phases){let t=p.tasks.find(x=>x.id===id);if(t)return t}return null}
+function doneCount(){return tasks().filter(t=>t.done).length}function pct(){let n=tasks().length;return n?Math.round(doneCount()/n*100):0}function level(){return Math.floor(data.xp/250)+1}
+function streak(){let s=new Set(data.completedDates||[]),d=new Date(),n=0;while(s.has(iso(d))){n++;d.setDate(d.getDate()-1)}return n}
+function markActive(){let d=iso();if(!data.completedDates.includes(d))data.completedDates.push(d)}
+function showView(id){document.querySelectorAll(".view").forEach(v=>v.classList.remove("active"));document.getElementById(id).classList.add("active");document.querySelectorAll(".nav button").forEach(b=>b.classList.toggle("active",b.dataset.view===id));if(id==="ai")renderChat();window.scrollTo({top:0,behavior:"smooth"})}
+
+let sb=null;
+let sbSession=null;
+let syncTimer=null;
+let syncing=false;
+let realtimeChannel=null;
+let applyingRemote=false;
+const DEVICE_KEY="ai_cse_device_id_v5";
+let deviceId=localStorage.getItem(DEVICE_KEY);
+if(!deviceId){deviceId=crypto.randomUUID?crypto.randomUUID():("dev-"+Math.random().toString(36).slice(2));localStorage.setItem(DEVICE_KEY,deviceId);}
+
+function sbConfigured(){
+  return !!(data.settings?.supabaseUrl && data.settings?.supabaseKey);
+}
+function initSupabase(){
+  if(!sbConfigured() || !window.supabase) return false;
+  try{
+    sb = window.supabase.createClient(data.settings.supabaseUrl.trim(), data.settings.supabaseKey.trim(), {
+      auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}
+    });
+    sb.auth.onAuthStateChange((_event, session)=>{
+      sbSession=session;
+      renderSettings();
+      if(session){ if(typeof pullCloud==="function") pullCloud(false); if(typeof startRealtime==="function") startRealtime(); } else if(typeof stopRealtime==="function") stopRealtime();
+    });
+    sb.auth.getSession().then(({data:sd})=>{
+      sbSession=sd.session;
+      renderSettings();
+      if(sbSession){ if(typeof pullCloud==="function") pullCloud(false); if(typeof startRealtime==="function") startRealtime(); }
+    });
+    return true;
+  }catch(e){return false}
+}
+function saveSupabaseConfig(){
+  const url=document.getElementById("sbUrl").value.trim();
+  const key=document.getElementById("sbKey").value.trim();
+  const status=document.getElementById("sbConnection");
+  if(!url || !key){
+    status.textContent="Enter both the Project URL and Publishable key.";
+    status.className="notice warn";
+    showToast("Missing Supabase URL or key");
+    return;
+  }
+  data.settings.supabaseUrl=url;
+  data.settings.supabaseKey=key;
+  try{
+    localStorage.setItem(KEY,JSON.stringify(data));
+  }catch(e){
+    status.textContent="Browser storage is blocked: "+e.message;
+    status.className="notice warn";
+    return;
+  }
+  const ready=initSupabase();
+  status.textContent=ready
+    ? "✅ Supabase configured. You can now create/sign in to your account."
+    : "✅ Connection details saved. Supabase library is not loaded yet; refresh this page and try again.";
+  status.className="notice success";
+  showToast("Supabase connection saved");
+}
+async function signUpAccount(){
+  if(!initSupabase()) return showToast("Save Supabase connection first");
+  const email=document.getElementById("authEmail").value.trim();
+  const password=document.getElementById("authPassword").value;
+  if(!email||!password)return showToast("Enter email and password");
+  const {error}=await sb.auth.signUp({email,password});
+  if(error){document.getElementById("authStatus").textContent="Signup error: "+error.message;return}
+  document.getElementById("authStatus").textContent="Account created. Check your email if verification is required, then sign in.";
+}
+async function signInAccount(){
+  if(!initSupabase()) return showToast("Save Supabase connection first");
+  const email=document.getElementById("authEmail").value.trim();
+  const password=document.getElementById("authPassword").value;
+  const {data:res,error}=await sb.auth.signInWithPassword({email,password});
+  if(error){document.getElementById("authStatus").textContent="Sign-in error: "+error.message;return}
+  sbSession=res.session; document.getElementById("authStatus").textContent="Signed in as "+res.user.email;
+  await pullCloud(true);
+}
+async function signOutAccount(){
+  if(sb) await sb.auth.signOut();
+  sbSession=null; renderSettings(); showToast("Signed out");
+}
+function syncPayload(){
+  const copy=JSON.parse(JSON.stringify(data));
+  if(copy.settings){copy.settings.supabaseKey="";copy.settings.appToken="";}
+  copy.__sync={deviceId};
+  return copy;
+}
+function mergeCloudToLocal(cloud){
+  if(!cloud)return false;
+  const local=data;
+  const savedSettings=data.settings;
+  data=cloud;
+  data.settings={...(data.settings||{}),supabaseUrl:savedSettings.supabaseUrl,supabaseKey:savedSettings.supabaseKey,mode:savedSettings.mode,backendUrl:savedSettings.backendUrl,appToken:savedSettings.appToken,provider:savedSettings.provider};
+  ensure(); return true;
+}
+async function uploadCloud(show=true){
+  if(!sbSession)return showToast("Sign in first");
+  if(syncing || applyingRemote)return;
+  syncing=true; setSyncText("☁ Uploading…");
+  try{
+    const payload=syncPayload();
+    const {data:row,error}=await sb.from("user_states")
+      .upsert({user_id:sbSession.user.id,state:payload,device_id:deviceId,updated_at:new Date().toISOString()},{onConflict:"user_id"})
+      .select("updated_at")
+      .single();
+    if(error)throw error;
+    data.__cloudUpdatedAt=row?.updated_at||null;
+    localStorage.setItem(KEY,JSON.stringify(data));
+    setSyncText("☁ Live sync on · uploaded "+new Date().toLocaleTimeString());
+    if(show)showToast("Uploaded to cloud");
+  }catch(e){setSyncText("Upload failed: "+e.message)}
+  finally{syncing=false}
+}
+async function downloadCloud(show=true){
+  if(!sbSession)return showToast("Sign in first");
+  if(syncing)return;
+  syncing=true; setSyncText("☁ Downloading…");
+  try{
+    const {data:row,error}=await sb.from("user_states")
+      .select("state,updated_at,device_id")
+      .eq("user_id",sbSession.user.id).maybeSingle();
+    if(error)throw error;
+    if(!row){setSyncText("☁ No cloud copy yet. Upload this device first.");return}
+    applyingRemote=true;
+    const savedSettings=data.settings;
+    data=row.state;
+    data.settings={...(data.settings||{}),
+      supabaseUrl:savedSettings?.supabaseUrl||"",
+      supabaseKey:savedSettings?.supabaseKey||"",
+      mode:savedSettings?.mode||"smart",
+      backendUrl:savedSettings?.backendUrl||"",
+      appToken:savedSettings?.appToken||"",
+      provider:savedSettings?.provider||"gemini"};
+    data.__cloudUpdatedAt=row.updated_at||null;
+    ensure();
+    localStorage.setItem(KEY,JSON.stringify(data));
+    applyingRemote=false;
+    render();
+    setSyncText("☁ Live sync on · downloaded "+new Date().toLocaleTimeString());
+    if(show)showToast("Cloud copy loaded");
+  }catch(e){applyingRemote=false;setSyncText("Download failed: "+e.message)}
+  finally{syncing=false}
+}
+async function syncNow(){
+  if(!sbSession)return showToast("Sign in first");
+  await downloadCloud(false);
+  await uploadCloud(false);
+  setSyncText("☁ Live sync on · synced "+new Date().toLocaleTimeString());
+  showToast("Synced");
+}
+function startRealtime(){
+  if(!sb || !sbSession)return;
+  stopRealtime();
+  realtimeChannel=sb.channel("user-state-sync-"+sbSession.user.id)
+    .on("postgres_changes",
+      {event:"UPDATE",schema:"public",table:"user_states",filter:`user_id=eq.${sbSession.user.id}`},
+      payload=>{
+        const row=payload.new;
+        if(!row || row.device_id===deviceId || !row.state || applyingRemote)return;
+        applyingRemote=true;
+        try{
+          const savedSettings=data.settings;
+          data=row.state;
+          data.settings={...(data.settings||{}),
+            supabaseUrl:savedSettings?.supabaseUrl||"",
+            supabaseKey:savedSettings?.supabaseKey||"",
+            mode:savedSettings?.mode||"smart",
+            backendUrl:savedSettings?.backendUrl||"",
+            appToken:savedSettings?.appToken||"",
+            provider:savedSettings?.provider||"gemini"};
+          data.__cloudUpdatedAt=row.updated_at||null;
+          localStorage.setItem(KEY,JSON.stringify(data));
+          applyingRemote=false;
+          render();
+          setSyncText("☁ Updated from your other device · "+new Date().toLocaleTimeString());
+          showToast("Synced from other device");
+        }catch(e){
+          applyingRemote=false;
+          setSyncText("Realtime update failed: "+e.message);
+        }
+      })
+    .subscribe(status=>{
+      if(status==="SUBSCRIBED")setSyncText("☁ Live sync on");
+      if(status==="CHANNEL_ERROR")setSyncText("Live sync connection error — refresh to retry.");
+    });
+}
+function stopRealtime(){
+  if(realtimeChannel && sb){sb.removeChannel(realtimeChannel);}
+  realtimeChannel=null;
+}
+
+function scheduleAutoSync(){
+  if(!sbSession || applyingRemote)return;
+  clearTimeout(syncTimer);
+  syncTimer=setTimeout(()=>uploadCloud(false),1200);
+}
+function setSyncText(s){const el=document.getElementById("syncStatus");if(el)el.textContent=s}
+
+function render(){ensure();renderDashboard();renderWeek();renderRoadmap();renderProjects();renderSettings();renderChat()}
+function renderDashboard(){
+document.getElementById("overall").textContent=pct()+"%";document.getElementById("xp").textContent=data.xp+" XP";document.getElementById("streak").textContent=streak()+" 🔥";document.getElementById("level").textContent="Level "+level();document.getElementById("dateLabel").textContent=new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});
+planDaily(false);let ids=data.daily[iso()]||[];let ds=ids.filter(i=>task(i)?.done).length;document.getElementById("todayBadge").textContent=`${ds}/${ids.length}`;document.getElementById("todayBar").style.width=(ids.length?Math.round(ds/ids.length*100):0)+"%";document.getElementById("todayList").innerHTML=ids.length?ids.map(i=>{let t=task(i);return t?`<div class="goal ${t.done?'done':''}"><input type="checkbox" ${t.done?'checked':''} onchange="toggleTask('${i}')"><div class="goaltext">${esc(t.title)}</div><span class="badge">${esc(t.phaseTitle||"Roadmap")}</span></div>`:""}).join(""):'<div class="empty" style="margin-top:9px">No daily tasks. Tap “Plan my day”.</div>';
+let focus=tasks().find(t=>!t.done);document.getElementById("focusTitle").textContent=focus?focus.title:"Roadmap complete 🎉";document.getElementById("focusText").textContent=focus?`Next in ${focus.phaseTitle}. ${focus.weekly?"Tagged for your weekly focus.": "Do a focused session: learn it, code something, test it, and write down what you learned."}`:"Add a new challenge or project.";
+let goals=data.week.goals||[],gd=goals.filter(g=>g.done).length,gp=goals.length?Math.round(gd/goals.length*100):0;document.getElementById("weekGoalPct").textContent=gp+"%";document.getElementById("weekGoalBar").style.width=gp+"%";document.getElementById("weekHoursText").textContent=`${data.week.hours} / ${data.week.target} hours this week`;document.getElementById("streakText").innerHTML=`<b>${streak()} day streak</b><br><span class="tiny muted">Consistency beats motivation.</span>`;
+}
+function planDaily(silent=true){let d=iso(),ids=data.daily[d]||[];if(ids.length<3){let existing=new Set(ids),add=tasks().filter(t=>!t.done&&!existing.has(t.id)).slice(0,3-ids.length);add.forEach(t=>ids.push(t.id));data.daily[d]=ids;save()}if(!silent){showToast("Today's plan updated")}}
+function planTodayModal(){openModal("Plan my day",`<div class="stack"><div class="two"><div class="field"><label>Available hours</label><input id="m_hours" type="number" min=".5" max="12" step=".5" value="2"></div><div class="field"><label>Energy</label><select id="m_energy"><option value="high">High</option><option value="medium" selected>Medium</option><option value="low">Low</option></select></div></div><div class="field"><label>What matters most tonight?</label><input id="m_priority" type="text" placeholder="e.g. Python / project / DSA"></div><div class="field"><label>Deadline or constraint</label><input id="m_deadline" type="text" placeholder="e.g. exam next week / no deadline"></div><div class="notice">The built-in planner will pick tasks from your roadmap. Connected AI can reason over the same context and give you a richer plan.</div></div>`,"dayplan")}
+function makeDailyPlan(hours,energy,priority,deadline){let pool=tasks().filter(t=>!t.done);let p=priority.toLowerCase();let scored=pool.map((t,i)=>{let score=0;if(t.title.toLowerCase().includes(p)||t.phaseTitle.toLowerCase().includes(p))score+=8;if(t.title.toLowerCase().startsWith("project"))score+=3;if(energy==="low"&&t.title.toLowerCase().startsWith("project"))score-=2;score+=Math.max(0,6-i*.05);return{t,score}}).sort((a,b)=>b.score-a.score);let count=Math.max(1,Math.min(5,Math.round(hours*1.5)));let chosen=scored.slice(0,count).map(x=>x.t);data.daily[iso()]=chosen.map(t=>t.id);data.week.hours+=hours;markActive();save();return chosen}
+function completeFocus(){let t=tasks().find(t=>!t.done);if(t)toggleTask(t.id)}
+function toggleTask(id){let t=task(id);if(!t)return;t.done=!t.done;if(t.done){data.xp+=25;t.lastCompleted=iso();markActive()}else{data.xp=Math.max(0,data.xp-25);data.completedDates=(data.completedDates||[]).filter(x=>x!==iso()||t.lastCompleted!==iso())}save();render()}
+function renderWeek(){let s=new Date(data.week.start+"T00:00:00"),e=new Date(s);e.setDate(e.getDate()+6);document.getElementById("weekRange").textContent=`${s.toLocaleDateString(undefined,{month:"short",day:"numeric"})} – ${e.toLocaleDateString(undefined,{month:"short",day:"numeric",year:"numeric"})}`;document.getElementById("hoursTarget").value=data.week.target;document.getElementById("hoursLabel").textContent=`${data.week.hours} / ${data.week.target}h`;document.getElementById("hoursBar").style.width=Math.min(100,Math.round(data.week.hours/data.week.target*100))+"%";document.getElementById("weeklyGoals").innerHTML=(data.week.goals||[]).map(g=>`<div class="goal ${g.done?'done':''}"><input type="checkbox" ${g.done?'checked':''} onchange="toggleGoal('${g.id}')"><div class="goaltext">${esc(g.text)}</div><button class="btn small danger" onclick="deleteGoal('${g.id}')">×</button></div>`).join("")||'<div class="empty">Add a goal.</div>';document.getElementById("hoursTarget").onchange=e=>{data.week.target=Math.max(1,Number(e.target.value)||10);save();renderWeek()}}
+function toggleGoal(id){let g=data.week.goals.find(x=>x.id===id);if(!g)return;g.done=!g.done;data.xp=Math.max(0,data.xp+(g.done?50:-50));markActive();save();render()}
+function deleteGoal(id){data.week.goals=data.week.goals.filter(x=>x.id!==id);save();render()}
+function addWeeklyGoal(){openModal("Add weekly goal",`<div class="field"><label>Goal</label><input id="m_goal" type="text" placeholder="e.g. Finish FastAPI basics"></div>`,"goal")}
+function logHours(h){data.week.hours+=h;data.xp+=Math.round(h*10);markActive();save();render();showToast(`Logged ${h} hour${h===1?'':'s'}`)}
+function resetWeek(){if(confirm("Reset this week's hours and goal checkboxes?")){data.week.hours=0;data.week.goals.forEach(g=>g.done=false);save();render()}}
+function renderRoadmap(){document.getElementById("roadmapList").innerHTML=data.phases.map((p,i)=>{let d=p.tasks.filter(t=>t.done).length,q=p.tasks.length?Math.round(d/p.tasks.length*100):0;return`<div class="phase ${p.open?'open':''}"><div class="phasehead" onclick="togglePhase('${p.id}')"><div class="phaseNum">${i+1}</div><div style="flex:1"><b>${esc(p.title)}</b><div class="tiny muted">${esc(p.timeframe)} · ${d}/${p.tasks.length} · ${q}%</div><div class="progress" style="margin-top:6px"><i style="width:${q}%"></i></div></div><span class="chev">›</span></div><div class="phasebody">${p.tasks.map(t=>`<div class="task ${t.done?'done':''}"><input type="checkbox" ${t.done?'checked':''} onchange="toggleTask('${t.id}')"><div><div class="tt">${esc(t.title)}</div><div class="td">${esc(t.details||"")}</div></div><div class="actions"><button class="btn small" onclick="openTaskModal('${p.id}','${t.id}')">Edit</button><button class="btn small danger" onclick="deleteTask('${p.id}','${t.id}')">×</button></div></div>`).join("")}<div style="margin-top:8px"><button class="btn small" onclick="openTaskModal('${p.id}')">+ Task</button></div></div></div>`}).join("")}
+function togglePhase(id){let p=data.phases.find(x=>x.id===id);p.open=!p.open;save();renderRoadmap()}
+function deleteTask(pid,tid){if(!confirm("Delete this task?"))return;let p=data.phases.find(x=>x.id===pid);p.tasks=p.tasks.filter(t=>t.id!==tid);save();render()}
+function openTaskModal(pid,tid){let t=tid?task(tid):null;openModal(tid?"Edit task":"Add task",`<div class="stack"><div class="field"><label>Phase</label><select id="m_phase">${data.phases.map(p=>`<option value="${p.id}" ${p.id===pid?'selected':''}>${esc(p.title)}</option>`).join("")}</select></div><div class="field"><label>Task title</label><input id="m_title" value="${esc(t?.title||"")}"></div><div class="field"><label>Details</label><textarea id="m_details">${esc(t?.details||"")}</textarea></div><div class="field"><label>Tags</label><input id="m_tags" value="${esc((t?.tags||[]).join(", "))}"></div></div>`,"task",tid?{tid,pid}:null)}
+function renderProjects(){document.getElementById("projectsList").innerHTML=data.projects.length?data.projects.map(p=>`<div class="project"><div class="projectTitle">${esc(p.title)}</div><div class="projectMeta">${esc(p.stack)} · <span class="badge">${esc(p.status)}</span></div><div class="tiny" style="line-height:1.45">${esc(p.notes)}</div><div class="projectMeta">Next: ${esc(p.next)}</div><div class="projectBtns"><button class="btn small" onclick="openProjectModal('${p.id}')">Edit</button><button class="btn small good" onclick="advanceProject('${p.id}')">Advance</button><button class="btn small danger" onclick="deleteProject('${p.id}')">Delete</button></div></div>`).join(""):'<div class="empty">No projects yet.</div>'}
+function openProjectModal(id){let p=id?data.projects.find(x=>x.id===id):null;openModal(id?"Edit project":"Add project",`<div class="stack"><div class="field"><label>Project name</label><input id="m_ptitle" value="${esc(p?.title||"")}"></div><div class="field"><label>Status</label><select id="m_pstatus">${["Idea","Planned","Building","Live","Paused"].map(s=>`<option ${p?.status===s?'selected':''}>${s}</option>`).join("")}</select></div><div class="field"><label>Stack</label><input id="m_pstack" value="${esc(p?.stack||"")}"></div><div class="field"><label>Description</label><textarea id="m_pnotes">${esc(p?.notes||"")}</textarea></div><div class="field"><label>Next action</label><input id="m_pnext" value="${esc(p?.next||"")}"></div></div>`,"project",{id:id||null})}
+function advanceProject(id){let p=data.projects.find(x=>x.id===id),s=["Idea","Planned","Building","Live","Paused"],i=s.indexOf(p.status);p.status=s[(i+1)%s.length];data.xp+=25;markActive();save();render();showToast(`${p.title} → ${p.status}`)}
+function deleteProject(id){if(confirm("Delete project?")){data.projects=data.projects.filter(x=>x.id!==id);save();render()}}
+function renderSettings(){
+  document.getElementById("aiMode").value=data.settings.mode;
+  document.getElementById("backendUrl").value=data.settings.backendUrl;
+  document.getElementById("appToken").value=data.settings.appToken;
+  document.getElementById("provider").value=data.settings.provider;
+  document.getElementById("target30").value=data.target30;
+  document.getElementById("bigTarget").value=data.bigTarget;
+  document.getElementById("sbUrl").value=data.settings.supabaseUrl||"";
+  document.getElementById("sbKey").value=data.settings.supabaseKey||"";
+  document.getElementById("aiStatus").textContent=data.settings.mode==="backend"&&data.settings.backendUrl?"Connected AI":"Free Smart Mode";
+  document.getElementById("connectionResult").textContent=data.settings.backendUrl?"Backend configured. Test it to verify connectivity.":"No backend configured — Free Smart Mode is active.";
+  document.getElementById("sbConnection").textContent=sbConfigured()?"Supabase configured.":"Cloud sync is not configured yet.";
+  document.getElementById("authStatus").textContent=sbSession?.user?.email?("Signed in as "+sbSession.user.email):"Not signed in.";
+}
+function saveSettings(){data.settings={mode:document.getElementById("aiMode").value,backendUrl:document.getElementById("backendUrl").value.trim(),appToken:document.getElementById("appToken").value.trim(),provider:document.getElementById("provider").value};save();renderSettings()}
+function savePersonal(){data.target30=document.getElementById("target30").value.trim();data.bigTarget=document.getElementById("bigTarget").value.trim();save();showToast("Targets saved")}
+function context(){return{today:iso(),overallProgress:pct()+"%",level:level(),xp:data.xp,streak:streak(),unfinishedTasks:tasks().filter(t=>!t.done).slice(0,25).map(t=>({task:t.title,phase:t.phaseTitle,weekly:t.weekly})),weeklyGoals:data.week.goals,weeklyHours:`${data.week.hours}/${data.week.target}`,projects:data.projects.map(p=>({name:p.title,status:p.status,stack:p.stack,next:p.next})),targets:{next30:data.target30,big:data.bigTarget}}}
+function smartAnswer(q){let c=context(),u=q.toLowerCase(),next=c.unfinishedTasks[0];if(!next)return"Your roadmap is complete. Add a harder project or a new skill to the roadmap.";if(u.includes("2 hours")||u.includes("study tonight"))return`For a 2-hour session, do this:\\n\\n1) 45 min — ${next.task}\\n2) 10 min — break\\n3) 45 min — implement a tiny example for ${next.task}\\n4) 20 min — test/debug + write 5 notes\\n\\nDo not start a new framework tonight. Finish the loop: learn → build → test.`;if(u.includes("week"))return`This week:\\n\\n• Primary: ${next.task} (${next.phase})\\n• Hours: ${c.weeklyHours}\\n• Goal check: ${c.weeklyGoals.filter(g=>g.done).length}/${c.weeklyGoals.length}\\n\\nYour priority is to complete one learning block and turn it into a project artifact before moving on.`;if(u.includes("project")){let p=c.projects.find(x=>x.status!=="Live")||c.projects[0];return`Push **${p.name}** next. Its next action is: ${p.next}. Keep scope small, get a working version online, then improve it.`}return`Based on your current tracker, your next unfinished task is **${next.task}** in **${next.phase}**.\\n\\nYour move: study the concept, build one tiny example, commit it to GitHub, and record what you learned.\\n\\nCurrent progress: ${c.overallProgress} · Level ${c.level} · ${c.streak}-day streak.`}
+function copyContextPrompt(){let prompt=`Act as my personal CSE+AI mentor. Here is my tracker state:\\n${JSON.stringify(context(),null,2)}\\n\\nTell me what I should do next, what to ignore for now, and give me a concrete plan. Keep me practical and accountable.`;navigator.clipboard?.writeText(prompt);window.open("https://chatgpt.com/","_blank");showToast("Context copied — ChatGPT opened")}
+function renderChat(){let el=document.getElementById("messages");if(!data.chat.length){el.innerHTML='<div class="msg system">I am your roadmap copilot. Ask me what to study, what project to build, how to spend tonight, or how to turn skills into portfolio proof.</div>'}else el.innerHTML=data.chat.map(m=>`<div class="msg ${m.role==='user'?'user':'ai'}">${esc(m.text)}</div>`).join("");el.scrollTop=el.scrollHeight}
+function askPreset(q){document.getElementById("chatInput").value=q;sendAI()}
+async function sendAI(){let input=document.getElementById("chatInput"),q=input.value.trim();if(!q)return;input.value="";data.chat.push({role:"user",text:q});renderChat();if(data.settings.mode==="backend"&&data.settings.backendUrl){try{let r=await fetch(data.settings.backendUrl,{method:"POST",headers:{"Content-Type":"application/json","x-app-token":data.settings.appToken},body:JSON.stringify({provider:data.settings.provider,question:q,context:context()})});let j=await r.json();if(!r.ok)throw new Error(j.error||"Backend error");data.chat.push({role:"assistant",text:j.answer||j.output_text||"No answer returned."})}catch(e){data.chat.push({role:"assistant",text:"Connected AI failed: "+e.message+"\\n\\nSwitch to Free Smart Mode or fix the backend URL."})}}else data.chat.push({role:"assistant",text:smartAnswer(q)});save();renderChat()}
+async function testAI(){if(!data.settings.backendUrl){document.getElementById("connectionResult").textContent="No backend configured.";return}try{let r=await fetch(data.settings.backendUrl,{method:"POST",headers:{"Content-Type":"application/json","x-app-token":data.settings.appToken},body:JSON.stringify({provider:data.settings.provider,question:"Reply with exactly: CONNECTION_OK",context:context()})});let j=await r.json();document.getElementById("connectionResult").textContent=r.ok?"Connection works: "+(j.answer||"OK"):"Connection failed: "+(j.error||"Unknown error");document.getElementById("connectionResult").className="notice "+(r.ok?"success":"warn")}catch(e){document.getElementById("connectionResult").textContent="Connection failed: "+e.message;document.getElementById("connectionResult").className="notice warn"}}
+let modalMode=null,modalMeta=null;function openModal(title,form,mode,meta){modalMode=mode;modalMeta=meta||null;document.getElementById("modalTitle").textContent=title;document.getElementById("modalForm").innerHTML=form;document.getElementById("modalbg").classList.add("show")}function closeModal(){document.getElementById("modalbg").classList.remove("show")}function modalBgClick(e){if(e.target.id==="modalbg")closeModal()}
+function saveModal(){if(modalMode==="goal"){let v=document.getElementById("m_goal").value.trim();if(v){data.week.goals.push({id:uid(),text:v,done:false});save();closeModal();render()}}else if(modalMode==="task"){let title=document.getElementById("m_title").value.trim();if(!title)return alert("Enter a title");let pid=document.getElementById("m_phase").value,details=document.getElementById("m_details").value.trim(),tags=document.getElementById("m_tags").value.split(",").map(x=>x.trim()).filter(Boolean);if(modalMeta){let t=task(modalMeta.tid),old=data.phases.find(p=>p.id===modalMeta.pid);t.title=title;t.details=details;t.tags=tags;if(pid!==modalMeta.pid){old.tasks=old.tasks.filter(x=>x.id!==t.id);data.phases.find(p=>p.id===pid).tasks.push(t)}}else data.phases.find(p=>p.id===pid).tasks.push({id:uid(),title,details,tags,done:false,weekly:false,lastCompleted:null});save();closeModal();render()}else if(modalMode==="project"){let title=document.getElementById("m_ptitle").value.trim();if(!title)return alert("Enter a project name");let obj={id:modalMeta.id||uid(),title,status:document.getElementById("m_pstatus").value,stack:document.getElementById("m_pstack").value.trim(),notes:document.getElementById("m_pnotes").value.trim(),next:document.getElementById("m_pnext").value.trim()};if(modalMeta.id){let i=data.projects.findIndex(x=>x.id===modalMeta.id);data.projects[i]=obj}else data.projects.push(obj);save();closeModal();render()}else if(modalMode==="dayplan"){let hrs=Math.max(.5,Number(document.getElementById("m_hours").value)||2),chosen=makeDailyPlan(hrs,document.getElementById("m_energy").value,document.getElementById("m_priority").value,document.getElementById("m_deadline").value);closeModal();render();showToast(`Planned ${chosen.length} tasks for today`) }}
+function exportData(){let b=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="ai-cse-command-center-backup.json";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500)}
+function importData(e){let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{data=JSON.parse(r.result);ensure();save();render();showToast("Backup imported")}catch(err){alert("Invalid backup file")}};r.readAsText(f);e.target.value=""}
+function showToast(s){let e=document.getElementById("toast");e.textContent=s;e.style.display="block";clearTimeout(window.tt);window.tt=setTimeout(()=>e.style.display="none",1800)}
+let deferredPrompt=null;window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredPrompt=e;document.getElementById("installCard").classList.add("show")});async function installPWA(){if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null}else showToast("Use browser menu → Install app / Add to Home screen")}
+if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))
+render()
+</script>
+</body>
+</html>
