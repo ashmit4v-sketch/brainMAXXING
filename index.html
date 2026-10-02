@@ -32,6 +32,7 @@ header{display:flex;justify-content:space-between;align-items:flex-start;gap:12p
 </style>
 </head>
 <body>
+<div id="runtimeError" class="notice warn" style="display:none;margin-bottom:10px"></div>
 <div class="app">
 <header>
   <div class="brand"><h1>brainMAXXING</h1><p>One place to learn, build, track, publish and eventually earn — with an AI copilot when you connect one.</p></div>
@@ -174,6 +175,13 @@ header{display:flex;justify-content:space-between;align-items:flex-start;gap:12p
 <div id="modalbg" class="modalbg" onclick="modalBgClick(event)"><div class="modal" onclick="event.stopPropagation()"><h3 id="modalTitle" style="margin-top:0">Modal</h3><div id="modalForm"></div><div class="actions" style="justify-content:flex-end;margin-top:12px"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn primary" onclick="saveModal()">Save</button></div></div></div>
 <div id="toast" style="position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:30;display:none;background:#17232f;border:1px solid #344960;border-radius:10px;padding:9px 12px;font-size:12px"></div>
 
+
+<script>
+window.addEventListener("error", (e)=>{
+  const el=document.getElementById("runtimeError");
+  if(el){el.style.display="block";el.textContent="App error: "+(e.message||"Unknown JavaScript error")+" — refresh with ?v=9 or clear the site data.";}
+});
+</script>
 <script>
 const KEY="ai_cse_command_center_v3";
 const phaseSeed=[
@@ -474,7 +482,14 @@ function exportData(){let b=new Blob([JSON.stringify(data,null,2)],{type:"applic
 function importData(e){let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{try{data=JSON.parse(r.result);ensure();save();render();showToast("Backup imported")}catch(err){alert("Invalid backup file")}};r.readAsText(f);e.target.value=""}
 function showToast(s){let e=document.getElementById("toast");e.textContent=s;e.style.display="block";clearTimeout(window.tt);window.tt=setTimeout(()=>e.style.display="none",1800)}
 let deferredPrompt=null;window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredPrompt=e;document.getElementById("installCard").classList.add("show")});async function installPWA(){if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null}else showToast("Use browser menu → Install app / Add to Home screen")}
-if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))
+if("serviceWorker"in navigator)window.addEventListener("load",async()=>{
+  try{
+    const regs=await navigator.serviceWorker.getRegistrations();
+    for(const reg of regs){try{await reg.update()}catch(e){}}
+    const reg=await navigator.serviceWorker.register("sw.js?v=9",{updateViaCache:"none"});
+    try{await reg.update()}catch(e){}
+  }catch(e){}
+})
 render()
 </script>
 </body>
