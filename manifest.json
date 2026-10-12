@@ -1,24 +1,14 @@
 {
   "name": "brainMAXXING",
   "short_name": "brainMAXXING",
-  "description": "Personal CSE + AI command center with persistent login and automatic sync",
-  "start_url": "./?v=12",
+  "description": "Personal CSE + AI command center with persistent login and per-item automatic cloud sync",
+  "start_url": "./?v=13",
   "display": "standalone",
   "background_color": "#090d13",
   "theme_color": "#090d13",
   "orientation": "portrait",
   "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    {"src":"icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"},
+    {"src":"icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}
   ]
 }

@@ -123,12 +123,20 @@ header{display:flex;justify-content:space-between;align-items:flex-start;gap:12p
     <hr style="border:0;border-top:1px solid var(--border);margin:14px 0">
     <h3>Account</h3>
     <div class="stack" style="margin-top:10px">
-      <div class="field"><label>Email</label><input id="authEmail" type="text" placeholder="you@example.com"></div>
-      <div class="field"><label>Password</label><input id="authPassword" type="password" placeholder="Use a strong password"></div>
-      <div class="actions">
-        <button class="btn primary" onclick="signUpAccount()">Create account</button>
-        <button class="btn" onclick="signInAccount()">Sign in</button>
-        <button class="btn danger" onclick="signOutAccount()">Sign out</button>
+      <div id="signedInCard" class="notice success" style="display:none">
+        <div><b>✅ You’re signed in</b></div>
+        <div id="signedInEmail" class="tiny" style="margin-top:4px"></div>
+        <div class="actions" style="margin-top:10px">
+          <button class="btn danger" onclick="signOutAccount()">Sign out this device</button>
+        </div>
+      </div>
+      <div id="authForm" class="stack">
+        <div class="field"><label>Email</label><input id="authEmail" type="text" autocomplete="email" placeholder="you@example.com"></div>
+        <div class="field"><label>Password</label><input id="authPassword" type="password" autocomplete="current-password" placeholder="Use a strong password"></div>
+        <div class="actions">
+          <button class="btn primary" onclick="signUpAccount()">Create account</button>
+          <button class="btn" onclick="signInAccount()">Sign in</button>
+        </div>
       </div>
       <div id="authStatus" class="notice">Not signed in.</div>
     </div>
@@ -202,7 +210,7 @@ function monday(d=new Date()){d=new Date(d);let day=(d.getDay()+6)%7;d.setDate(d
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
 function seed(){let phases=phaseSeed.map((p,i)=>({id:"p"+(i+1),title:p[0],timeframe:p[1],focus:"Learn this, then use it in a small build.",open:i===0,tasks:[]}));for(const [title,items] of taskSeed){let p=phases.find(x=>x.title===title);p.tasks=items.map(x=>({id:uid(),title:x,details:"Learn → code → test → explain.",tags:[p.focus],done:false,weekly:false,lastCompleted:null}))};return{version:3,phases,projects:[{id:uid(),title:"College AI Assistant",status:"Idea",stack:"Python, FastAPI, React, RAG",notes:"Question-answering over college notes/PDFs with citations.",next:"Start Python"},{id:uid(),title:"AI Study Agent",status:"Planned",stack:"Python, LLM, tools",notes:"Syllabus → study plan → quizzes → weak-topic tracking.",next:"Finish API basics"},{id:uid(),title:"Business Automation System",status:"Idea",stack:"Python, APIs, AI, database",notes:"Lead extraction, classification, follow-ups and dashboard.",next:"Find one repetitive business workflow"}],xp:0,completedDates:[],daily:{},week:{start:iso(monday()),hours:0,target:10,goals:[{id:uid(),text:"Study 5 focused sessions",done:false},{id:uid(),text:"Ship/improve one project",done:false},{id:uid(),text:"Push meaningful work to GitHub",done:false}]},notes:"",target30:"",bigTarget:"",settings:{mode:"smart",backendUrl:"",appToken:"",provider:"gemini",supabaseUrl:"",supabaseKey:""},chat:[]}}
 let data;try{data=JSON.parse(localStorage.getItem(KEY))||seed()}catch(e){data=seed()}
-function save(){localStorage.setItem(KEY,JSON.stringify(data));scheduleAutoSync()}
+function save(){saveLocalOnly();if(syncReady && !applyingRemote)detectLocalChanges();if(typeof scheduleAutoSync==="function")scheduleAutoSync()}
 function ensure(){
   if(!data.version)data=seed();
   if(!data.settings)data.settings={mode:"smart",backendUrl:"",appToken:"",provider:"gemini",supabaseUrl:"",supabaseKey:""};
@@ -223,236 +231,180 @@ function showView(id){document.querySelectorAll(".view").forEach(v=>v.classList.
 
 
 
+
+/* brainMAXXING v13.1: polished signed-in account UI + per-record sync */
 var sbSession=null;
 var syncTimer=null;
 var refreshTimer=null;
 var pollTimer=null;
 var syncing=false;
 var applyingRemote=false;
-var lastLocalWrite=0;
-var lastKnownCloudUpdatedAt=null;
-const DEVICE_KEY="brainmaxxing_device_id_v12";
+var syncReady=false;
+var syncMeta=null;
+var DEVICE_KEY="brainmaxxing_device_id_v13_1";
+var SESSION_KEY="brainmaxxing_auth_session_v13_1";
+var OLD_SESSION_KEYS=["brainmaxxing_auth_session_v12","brainmaxxing_auth_session_v7"];
+var SYNC_META_KEY="brainmaxxing_sync_meta_v13_1";
+var SYNC_TABLE="brainmaxxing_sync_records";
 var deviceId=localStorage.getItem(DEVICE_KEY);
-if(!deviceId){
-  deviceId=(crypto.randomUUID?crypto.randomUUID():("dev-"+Math.random().toString(36).slice(2)+Date.now()));
-  localStorage.setItem(DEVICE_KEY,deviceId);
-}
-const SESSION_KEY="brainmaxxing_auth_session_v12";
-const OLD_SESSION_KEY="brainmaxxing_auth_session_v7";
+if(!deviceId){deviceId=(crypto.randomUUID?crypto.randomUUID():"dev-"+Math.random().toString(36).slice(2)+Date.now());localStorage.setItem(DEVICE_KEY,deviceId)}
 
-function sbConfigured(){return !!(data.settings?.supabaseUrl && data.settings?.supabaseKey)}
-function sbBase(){return (data.settings.supabaseUrl||"").replace(/\/+$/,"")}
-function sbHeaders(token){
-  return {"Content-Type":"application/json","apikey":data.settings.supabaseKey,...(token?{"Authorization":"Bearer "+token}:{})};
-}
+function clone(v){return JSON.parse(JSON.stringify(v))}
+function canonical(v){return JSON.stringify(v??null)}
+function nowIso(){return new Date().toISOString()}
+function loadSyncMeta(){try{var m=JSON.parse(localStorage.getItem(SYNC_META_KEY)||"null");if(m&&m.records)return m}catch(e){}return{records:{},lastPullAt:null}}
+syncMeta=loadSyncMeta();
+function saveSyncMeta(){localStorage.setItem(SYNC_META_KEY,JSON.stringify(syncMeta))}
+function sbConfigured(){return!!(data.settings?.supabaseUrl&&data.settings?.supabaseKey)}
+function sbBase(){return(data.settings.supabaseUrl||"").replace(/\/+$/,'')}
+function sbHeaders(token){return{"Content-Type":"application/json","apikey":data.settings.supabaseKey,...(token?{"Authorization":"Bearer "+token}:{})}}
 function saveLocalOnly(){localStorage.setItem(KEY,JSON.stringify(data))}
-function save(){
-  saveLocalOnly();
-  lastLocalWrite=Date.now();
-  scheduleAutoSync();
-}
-function persistSession(){
-  if(sbSession)localStorage.setItem(SESSION_KEY,JSON.stringify(sbSession));
-  else localStorage.removeItem(SESSION_KEY);
-}
-function loadPersistedSession(){
-  try{
-    var raw=localStorage.getItem(SESSION_KEY)||localStorage.getItem(OLD_SESSION_KEY);
-    sbSession=raw?JSON.parse(raw):null;
-    if(sbSession && !localStorage.getItem(SESSION_KEY))localStorage.setItem(SESSION_KEY,JSON.stringify(sbSession));
-  }catch(e){sbSession=null}
-}
-function jwtExpiryMs(token){
-  try{
-    var p=JSON.parse(atob(token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
-    return (Number(p.exp)||0)*1000;
-  }catch(e){return 0}
-}
-async function refreshSessionIfNeeded(force=false){
-  if(!sbSession?.refresh_token || !sbConfigured())return !!sbSession;
-  var exp=jwtExpiryMs(sbSession.access_token);
-  if(!force && exp && Date.now()<exp-60000)return true;
-  try{
-    var body=await sbFetchRaw("/auth/v1/token?grant_type=refresh_token",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({refresh_token:sbSession.refresh_token})
-    });
-    if(body?.access_token){
-      sbSession={...sbSession,...body};
-      persistSession();
-      scheduleTokenRefresh();
-      return true;
-    }
-  }catch(e){
-    // Only clear the local session when refresh is definitely invalid.
-    var msg=String(e.message||"");
-    if(/refresh token|invalid|not found|expired/i.test(msg)){sbSession=null;persistSession();stopPolling();}
-  }
-  return !!sbSession;
-}
-function scheduleTokenRefresh(){
-  clearTimeout(refreshTimer);
-  if(!sbSession?.access_token)return;
-  var exp=jwtExpiryMs(sbSession.access_token);
-  if(!exp)return;
-  var wait=Math.max(15000,exp-Date.now()-120000);
-  refreshTimer=setTimeout(()=>refreshSessionIfNeeded(true),wait);
-}
-async function sbFetchRaw(path,options={}){
-  var r=await fetch(sbBase()+path,{...options,headers:{...sbHeaders(sbSession?.access_token),...(options.headers||{})}});
-  var body=null; try{body=await r.json()}catch(e){}
-  if(!r.ok)throw new Error(body?.msg||body?.message||body?.error_description||body?.error?.message||("HTTP "+r.status));
-  return body;
-}
-async function sbFetch(path,options={}){
-  await refreshSessionIfNeeded(false);
-  return await sbFetchRaw(path,options);
-}
-function saveSupabaseConfig(){
-  var url=document.getElementById("sbUrl").value.trim();
-  var key=document.getElementById("sbKey").value.trim();
-  var status=document.getElementById("sbConnection");
-  if(!url||!key){
-    status.textContent="Enter both the Project URL and Publishable key.";
-    status.className="notice warn"; showToast("Missing Supabase URL or key"); return;
-  }
-  if(!(url.startsWith("https://")||url.startsWith("http://"))){
-    status.textContent="The Project URL should start with https://";
-    status.className="notice warn"; return;
-  }
-  data.settings.supabaseUrl=url; data.settings.supabaseKey=key; saveLocalOnly();
-  status.textContent="✅ Supabase configured. Your account can use persistent login and cloud sync.";
-  status.className="notice success"; showToast("Supabase connection saved");
-}
-async function signUpAccount(){
-  if(!sbConfigured())return showToast("Save Supabase connection first");
-  var email=document.getElementById("authEmail").value.trim(),password=document.getElementById("authPassword").value;
-  if(!email||!password)return showToast("Enter email and password");
-  try{
-    var body=await sbFetchRaw("/auth/v1/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});
-    if(body?.access_token){sbSession=body;persistSession();scheduleTokenRefresh();startPolling()}
-    document.getElementById("authStatus").textContent=body?.access_token
-      ?"✅ Account created and signed in. Upload your device to cloud."
-      :"✅ Account created. Check your email if confirmation is required, then sign in.";
-    renderSettings();
-  }catch(e){document.getElementById("authStatus").textContent="Signup error: "+e.message}
-}
-async function signInAccount(){
-  if(!sbConfigured())return showToast("Save Supabase connection first");
-  var email=document.getElementById("authEmail").value.trim(),password=document.getElementById("authPassword").value;
-  if(!email||!password)return showToast("Enter email and password");
-  try{
-    var body=await sbFetchRaw("/auth/v1/token?grant_type=password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});
-    sbSession=body; persistSession(); scheduleTokenRefresh(); startPolling();
-    document.getElementById("authStatus").textContent="✅ Signed in as "+(body.user?.email||email);
-    renderSettings(); await reconcileCloud("login"); showToast("Signed in");
-  }catch(e){document.getElementById("authStatus").textContent="Sign-in error: "+e.message}
-}
-async function signOutAccount(){
-  // Local-only sign out prevents accidentally revoking the session on the other device.
-  sbSession=null; persistSession(); stopPolling(); renderSettings(); showToast("Signed out on this device");
-}
-function syncPayload(){
-  var copy=JSON.parse(JSON.stringify(data));
-  if(copy.settings){copy.settings.supabaseKey="";copy.settings.appToken="";}
-  copy.__sync={deviceId,clientVersion:"v12"};
-  return copy;
-}
-function mergeCloudToLocal(cloud,updatedAt){
-  if(!cloud)return false;
-  var savedSettings={...data.settings};
-  data=cloud;
-  data.settings={...(data.settings||{}),
-    supabaseUrl:savedSettings.supabaseUrl||"",
-    supabaseKey:savedSettings.supabaseKey||"",
-    mode:savedSettings.mode||"smart",backendUrl:savedSettings.backendUrl||"",
-    appToken:savedSettings.appToken||"",provider:savedSettings.provider||"gemini"};
-  data.__cloudUpdatedAt=updatedAt||data.__cloudUpdatedAt||null;
-  lastKnownCloudUpdatedAt=updatedAt||lastKnownCloudUpdatedAt;
-  saveLocalOnly();
-  return true;
-}
-async function uploadCloud(show=true){
-  if(!sbSession)return false;
-  if(syncing||applyingRemote)return false;
-  syncing=true; setSyncText("☁ Uploading…");
-  try{
-    var ok=await refreshSessionIfNeeded(false); if(!ok)throw new Error("Session expired. Please sign in again.");
-    var payload=syncPayload();
-    var now=new Date().toISOString();
-    var rows=await sbFetch("/rest/v1/user_states?on_conflict=user_id",{
-      method:"POST",
-      headers:{"Prefer":"resolution=merge-duplicates,return=representation"},
-      body:JSON.stringify({user_id:sbSession.user.id,state:payload,device_id:deviceId,updated_at:now})
-    });
-    var t=rows?.[0]?.updated_at||now;
-    data.__cloudUpdatedAt=t; lastKnownCloudUpdatedAt=t; saveLocalOnly();
-    setSyncText("☁ Auto-sync on · saved "+new Date().toLocaleTimeString());
-    if(show)showToast("Saved to cloud");
-    return true;
-  }catch(e){setSyncText("Cloud sync error: "+e.message);return false}
-  finally{syncing=false}
-}
-async function getCloudRow(){
-  var rows=await sbFetch("/rest/v1/user_states?select=state,updated_at,device_id&user_id=eq."+encodeURIComponent(sbSession.user.id)+"&limit=1",{method:"GET"});
-  return rows?.[0]||null;
-}
-async function downloadCloud(show=true){
-  if(!sbSession)return showToast("Sign in first");
-  if(syncing)return false; syncing=true; setSyncText("☁ Checking cloud…");
-  try{
-    var row=await getCloudRow();
-    if(!row){setSyncText("☁ No cloud copy yet. Upload this device first.");return false}
-    var cloudTime=new Date(row.updated_at||0).getTime(),localTime=new Date(data.__cloudUpdatedAt||0).getTime();
-    if(cloudTime>=localTime || !lastLocalWrite){
-      applyingRemote=true; mergeCloudToLocal(row.state,row.updated_at); applyingRemote=false;
-      render();
-    }
-    setSyncText("☁ Auto-sync on · checked "+new Date().toLocaleTimeString());
-    if(show)showToast("Cloud state loaded");
-    return true;
-  }catch(e){setSyncText("Cloud check failed: "+e.message);return false}
-  finally{syncing=false}
-}
-async function reconcileCloud(reason){
-  if(!sbSession)return;
-  try{
-    var row=await getCloudRow();
-    if(!row){await uploadCloud(false);return}
-    var cloudTime=new Date(row.updated_at||0).getTime();
-    var localTime=new Date(data.__cloudUpdatedAt||0).getTime();
-    // On first login, cloud wins if it has a state. Otherwise local changes are uploaded.
-    if(reason==="login" && row.state){
-      applyingRemote=true; mergeCloudToLocal(row.state,row.updated_at); applyingRemote=false; render(); return;
-    }
-    if(cloudTime>localTime && cloudTime>lastLocalWrite){applyingRemote=true;mergeCloudToLocal(row.state,row.updated_at);applyingRemote=false;render();return}
-    await uploadCloud(false);
-  }catch(e){setSyncText("Sync error: "+e.message)}
-}
-function scheduleAutoSync(){
-  if(!sbSession||applyingRemote)return;
-  clearTimeout(syncTimer);
-  syncTimer=setTimeout(()=>uploadCloud(false),1200);
-}
-async function pollCloud(){
-  if(!sbSession||syncing||applyingRemote)return;
-  try{
-    await refreshSessionIfNeeded(false);
-    var row=await getCloudRow(); if(!row)return;
-    var cloudTime=new Date(row.updated_at||0).getTime(),localCloud=new Date(data.__cloudUpdatedAt||0).getTime();
-    if(row.device_id!==deviceId && cloudTime>localCloud && cloudTime>lastLocalWrite){
-      applyingRemote=true; mergeCloudToLocal(row.state,row.updated_at); applyingRemote=false; render();
-      setSyncText("☁ Updated from your other device · "+new Date().toLocaleTimeString());
-      showToast("Synced from other device");
-    }
-  }catch(e){}
-}
-function startPolling(){
-  stopPolling(); scheduleTokenRefresh(); pollCloud(); pollTimer=setInterval(pollCloud,3000);
-}
-function stopPolling(){if(pollTimer)clearInterval(pollTimer);pollTimer=null;clearTimeout(refreshTimer);refreshTimer=null}
-function setSyncText(s){var el=document.getElementById("syncStatus");if(el)el.textContent=s}
+function persistSession(){if(sbSession)localStorage.setItem(SESSION_KEY,JSON.stringify(sbSession));else localStorage.removeItem(SESSION_KEY)}
+function loadPersistedSession(){try{var raw=localStorage.getItem(SESSION_KEY);if(!raw){for(var k of OLD_SESSION_KEYS){raw=localStorage.getItem(k);if(raw)break}}sbSession=raw?JSON.parse(raw):null;if(sbSession)localStorage.setItem(SESSION_KEY,JSON.stringify(sbSession))}catch(e){sbSession=null}}
+function jwtExpiryMs(token){try{var p=JSON.parse(atob(token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));return(Number(p.exp)||0)*1000}catch(e){return 0}}
+async function sbFetchRaw(path,options={}){var r=await fetch(sbBase()+path,{...options,headers:{...sbHeaders(sbSession?.access_token),...(options.headers||{})}});var body=null;try{body=await r.json()}catch(e){}if(!r.ok)throw new Error(body?.msg||body?.message||body?.error_description||body?.error?.message||("HTTP "+r.status));return body}
+async function refreshSessionIfNeeded(force=false){if(!sbSession?.refresh_token||!sbConfigured())return!!sbSession;var exp=jwtExpiryMs(sbSession.access_token);if(!force&&exp&&Date.now()<exp-60000)return true;try{var body=await sbFetchRaw("/auth/v1/token?grant_type=refresh_token",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({refresh_token:sbSession.refresh_token})});if(body?.access_token){sbSession={...sbSession,...body};persistSession();scheduleTokenRefresh();return true}}catch(e){var msg=String(e.message||"");if(/refresh token|invalid|not found|expired/i.test(msg)){sbSession=null;persistSession();stopPolling()}}return!!sbSession}
+function scheduleTokenRefresh(){clearTimeout(refreshTimer);if(!sbSession?.access_token)return;var exp=jwtExpiryMs(sbSession.access_token);if(!exp)return;refreshTimer=setTimeout(()=>refreshSessionIfNeeded(true),Math.max(15000,exp-Date.now()-120000))}
+async function sbFetch(path,options={}){if(!(await refreshSessionIfNeeded(false)))throw new Error("Session expired — sign in again");return await sbFetchRaw(path,options)}
+function saveSupabaseConfig(){var url=document.getElementById("sbUrl").value.trim(),key=document.getElementById("sbKey").value.trim(),status=document.getElementById("sbConnection");if(!url||!key){status.textContent="Enter both the Project URL and Publishable key.";status.className="notice warn";showToast("Missing Supabase URL or key");return}if(!(url.startsWith("https://")||url.startsWith("http://"))){status.textContent="The Project URL should start with https://";status.className="notice warn";return}data.settings.supabaseUrl=url;data.settings.supabaseKey=key;saveLocalOnly();status.textContent="✅ Supabase configured. Per-item cloud sync is ready.";status.className="notice success";showToast("Supabase connection saved");if(sbSession)prepareCloudOnLogin().then(startPolling)}
+async function signUpAccount(){if(!sbConfigured())return showToast("Save Supabase connection first");var email=document.getElementById("authEmail").value.trim(),password=document.getElementById("authPassword").value;if(!email||!password)return showToast("Enter email and password");try{var body=await sbFetchRaw("/auth/v1/signup",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});if(body?.access_token){sbSession=body;persistSession();scheduleTokenRefresh();await prepareCloudOnLogin();startPolling()}document.getElementById("authStatus").textContent=body?.access_token?"✅ Account created and sync is ready.":"✅ Account created. Check your email if confirmation is required, then sign in.";renderSettings()}catch(e){document.getElementById("authStatus").textContent="Signup error: "+e.message}}
+async function signInAccount(){if(!sbConfigured())return showToast("Save Supabase connection first");var email=document.getElementById("authEmail").value.trim(),password=document.getElementById("authPassword").value;if(!email||!password)return showToast("Enter email and password");try{var body=await sbFetchRaw("/auth/v1/token?grant_type=password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password})});sbSession=body;persistSession();scheduleTokenRefresh();document.getElementById("authStatus").textContent="✅ Signed in as "+(body.user?.email||email);renderSettings();await prepareCloudOnLogin();startPolling();showToast("Signed in")}catch(e){document.getElementById("authStatus").textContent="Sign-in error: "+e.message}}
+async function signOutAccount(){sbSession=null;persistSession();stopPolling();syncReady=false;var e=document.getElementById("authEmail"),p=document.getElementById("authPassword");if(e)e.value="";if(p)p.value="";renderSettings();showToast("Signed out on this device")}
 
+function buildRecordMap(){var out={};data.phases.forEach(p=>{out["phase:"+p.id]={type:"phase",data:{id:p.id,title:p.title,timeframe:p.timeframe,focus:p.focus,open:!!p.open}};p.tasks.forEach(t=>{out["task:"+t.id]={type:"task",data:{...clone(t),phaseId:p.id}}})});data.projects.forEach(p=>out["project:"+p.id]={type:"project",data:clone(p)});out["week"]={type:"week",data:{start:data.week.start,hours:data.week.hours,target:data.week.target}};(data.week.goals||[]).forEach(g=>out["goal:"+g.id]={type:"goal",data:clone(g)});out["profile"]={type:"profile",data:{notes:data.notes||"",target30:data.target30||"",bigTarget:data.bigTarget||""}};out["meta"]={type:"meta",data:{xp:Number(data.xp)||0,completedDates:Array.from(new Set(data.completedDates||[]))}};Object.entries(data.daily||{}).forEach(([day,ids])=>out["daily:"+day]={type:"daily",data:Array.from(new Set(ids||[]))});out["chat"]={type:"chat",data:clone(data.chat||[])};return out}
+function mergeSpecial(key,localData,cloudData){if(key==="meta")return{xp:Math.max(Number(localData?.xp)||0,Number(cloudData?.xp)||0),completedDates:Array.from(new Set([...(localData?.completedDates||[]),...(cloudData?.completedDates||[])]))};if(key==="week")return{start:cloudData?.start||localData?.start,hours:Math.max(Number(localData?.hours)||0,Number(cloudData?.hours)||0),target:cloudData?.target??localData?.target??10};if(String(key).startsWith("daily:"))return Array.from(new Set([...(localData||[]),...(cloudData||[])]));return clone(cloudData)}
+function applyRecordMap(records){var oldSettings=clone(data.settings||{}),oldPhases=clone(data.phases||[]);var phaseList=Object.values(records).filter(r=>r.type==="phase"&&!r.deleted).map(r=>clone(r.data));var tasksByPhase={};Object.values(records).forEach(r=>{if(r.type==="task"&&!r.deleted){var pid=r.data.phaseId;tasksByPhase[pid]||=[];var t=clone(r.data);delete t.phaseId;tasksByPhase[pid].push(t)}});phaseList.forEach(p=>p.tasks=tasksByPhase[p.id]||[]);if(!phaseList.length)phaseList=oldPhases;phaseList.sort((a,b)=>{var ai=oldPhases.findIndex(p=>p.id===a.id),bi=oldPhases.findIndex(p=>p.id===b.id);if(ai<0&&bi<0)return a.id.localeCompare(b.id);if(ai<0)return 1;if(bi<0)return-1;return ai-bi});var projects=Object.values(records).filter(r=>r.type==="project"&&!r.deleted).map(r=>clone(r.data));if(!projects.length)projects=clone(data.projects||[]);var goals=Object.values(records).filter(r=>r.type==="goal"&&!r.deleted).map(r=>clone(r.data));var week=records.week?.deleted?data.week:{...(records.week?.data||data.week),goals};var profile=records.profile?.deleted?{}:(records.profile?.data||{}),meta=records.meta?.deleted?{}:(records.meta?.data||{}),daily={};Object.entries(records).forEach(([key,r])=>{if(r.type==="daily"&&!r.deleted)daily[key.slice(6)]=clone(r.data)});var chat=records.chat?.deleted?[]:clone(records.chat?.data||[]);data={...data,phases:phaseList,projects,week,notes:profile.notes||"",target30:profile.target30||"",bigTarget:profile.bigTarget||"",xp:Number(meta.xp)||0,completedDates:Array.from(new Set(meta.completedDates||[])),daily,settings:oldSettings,chat};ensure();data.settings=oldSettings;saveLocalOnly()}
+
+function upsertLocalMeta(key,patch){syncMeta.records[key]={...(syncMeta.records[key]||{}),...patch}}
+function markLocalDirtyMap(){
+  var current=buildRecordMap(), recs=syncMeta.records||{}, now=nowIso();
+  Object.keys(recs).forEach(key=>{
+    var m=recs[key];
+    if(!(key in current) && !m.deleted && !m.dirty){
+      recs[key]={...m,updatedAt:now,deleted:true,dirty:true,localData:null};
+    }
+  });
+  Object.entries(current).forEach(([key,r])=>{
+    var cur=canonical(r.data),m=recs[key];
+    if(!m){
+      recs[key]={updatedAt:"1970-01-01T00:00:00.000Z",deleted:false,dirty:true,lastSyncedData:null,localData:cur};
+      return;
+    }
+    if(m.deleted){
+      if(m.localData!==cur || !m.dirty)recs[key]={...m,updatedAt:now,deleted:false,dirty:true,localData:cur};
+      return;
+    }
+    if(m.localData!==cur){
+      recs[key]={...m,updatedAt:now,deleted:false,dirty:true,localData:cur};
+    }
+  });
+  syncMeta.records=recs;saveSyncMeta();
+}
+function dirtyRows(){
+  var current=buildRecordMap(),rows=[];
+  Object.entries(syncMeta.records||{}).forEach(([key,m])=>{
+    if(!m.dirty)return;
+    var r=current[key];
+    rows.push({record_key:key,record_type:r?.type||"tombstone",record_data:r?.data??null,deleted:!r,device_id:deviceId,updated_at:m.updatedAt||nowIso()});
+  });
+  return rows;
+}
+function markUploaded(rows){
+  var current=buildRecordMap();
+  rows.forEach(row=>{
+    var key=row.record_key,m=syncMeta.records[key],cur=current[key];
+    syncMeta.records[key]={
+      ...(m||{}),dirty:false,deleted:!!row.deleted,updatedAt:row.updated_at||m?.updatedAt||nowIso(),
+      localData:cur?canonical(cur.data):null,lastSyncedData:cur?canonical(cur.data):null
+    };
+  });
+  syncMeta.lastPullAt=nowIso();saveSyncMeta();
+}
+function markAllForUpload(stamp){
+  var current=buildRecordMap(),ts=stamp||nowIso(),rows=[];
+  syncMeta.records={};
+  Object.entries(current).forEach(([key,r])=>{var c=canonical(r.data);syncMeta.records[key]={updatedAt:ts,deleted:false,dirty:true,localData:c,lastSyncedData:null};rows.push({record_key:key,record_type:r.type,record_data:r.data,deleted:false,device_id:deviceId,updated_at:ts})});
+  syncMeta.lastPullAt=null;saveSyncMeta();return rows;
+}
+function detectLocalChanges(){if(syncReady&&!applyingRemote)markLocalDirtyMap()}
+async function getRows(){return await sbFetch("/rest/v1/"+SYNC_TABLE+"?select=record_key,record_type,record_data,deleted,device_id,updated_at&order=record_key",{method:"GET"})}
+async function upsertRows(rows){if(!rows?.length)return;await sbFetch("/rest/v1/"+SYNC_TABLE+"?on_conflict=user_id,record_key",{method:"POST",headers:{"Prefer":"resolution=merge-duplicates,return=minimal"},body:JSON.stringify(rows.map(x=>({user_id:sbSession.user.id,...x})))})}
+async function legacyRow(){try{var rows=await sbFetch("/rest/v1/user_states?select=state,updated_at&user_id=eq."+encodeURIComponent(sbSession.user.id)+"&limit=1",{method:"GET"});return rows?.[0]||null}catch(e){return null}}
+async function migrateLegacy(row){
+  var savedSettings=clone(data.settings||{}),legacy=clone(row.state);data=legacy;data.settings=savedSettings;ensure();syncReady=false;syncMeta={records:{},lastPullAt:null};
+  var stamp=row.updated_at||nowIso(),rows=markAllForUpload(stamp);
+  try{await upsertRows(rows);markUploaded(rows);saveLocalOnly()}catch(e){saveSyncMeta();throw e}
+}
+function cloudMap(rows){var out={};(rows||[]).forEach(r=>out[r.record_key]={type:r.record_type,data:r.record_data,deleted:!!r.deleted,updated_at:r.updated_at,device_id:r.device_id||""});return out}
+function mergeCloud(rows){
+  var cloud=cloudMap(rows),local=buildRecordMap(),merged={},keys=new Set([...Object.keys(local),...Object.keys(cloud)]),changed=false;
+  keys.forEach(key=>{
+    var c=cloud[key],l=local[key],m=syncMeta.records?.[key]||null,lt=m?.updatedAt||"1970-01-01T00:00:00.000Z",ct=c?.updated_at||"1970-01-01T00:00:00.000Z";
+    if(m?.dirty){
+      if(l)merged[key]=clone(l);
+      else if(c&&!c.deleted)merged[key]={type:c.type,data:clone(c.data),deleted:false};
+      else if(c?.deleted)syncMeta.records[key]={...m,deleted:true};
+      return;
+    }
+    if(c && (!l || new Date(ct)>new Date(lt))){
+      if(!c.deleted)merged[key]={type:c.type,data:clone(c.data),deleted:false};
+      syncMeta.records[key]={...(m||{}),updatedAt:ct,deleted:!!c.deleted,dirty:false,localData:c.deleted?null:canonical(c.data),lastSyncedData:c.deleted?null:canonical(c.data)};
+      changed=true;
+    }else if(l){
+      merged[key]=clone(l);
+      if(!m)syncMeta.records[key]={updatedAt:lt,deleted:false,dirty:false,localData:canonical(l.data),lastSyncedData:canonical(l.data)};
+    }
+  });
+  Object.keys(cloud).forEach(key=>{
+    var c=cloud[key],l=local[key],m=syncMeta.records?.[key];
+    if(!c||c.deleted||!l||m?.dirty)return;
+    if(key==="meta"||key==="week"||key.startsWith("daily:")){
+      var mergedData=mergeSpecial(key,l.data,c.data),mergedCanon=canonical(mergedData),localCanon=canonical(l.data);
+      merged[key]={type:l.type||c.type,data:mergedData,deleted:false};
+      if(mergedCanon!==localCanon){
+        var ts=nowIso();syncMeta.records[key]={...(m||{}),updatedAt:ts,deleted:false,dirty:true,localData:mergedCanon};
+      }else syncMeta.records[key]={...(m||{}),updatedAt:new Date(lt)>new Date(ct)?lt:ct,deleted:false,dirty:false,localData:localCanon,lastSyncedData:localCanon};
+      changed=true;
+    }
+  });
+  applyingRemote=true;try{applyRecordMap(merged)}finally{applyingRemote=false}
+  syncMeta.lastPullAt=nowIso();saveSyncMeta();saveLocalOnly();return changed;
+}
+async function prepareCloudOnLogin(){
+  if(!sbSession)return;syncReady=false;
+  try{
+    var rows=await getRows();
+    if(rows?.length){
+      mergeCloud(rows);syncReady=true;setSyncText("☁ Per-item auto-sync on");await pushLocalChanges();return;
+    }
+    var legacy=await legacyRow();
+    if(legacy?.state){await migrateLegacy(legacy);syncReady=true;setSyncText("☁ Auto-sync on · existing cloud data migrated");return;}
+    syncReady=true;var first=markAllForUpload();await upsertRows(first);markUploaded(first);setSyncText("☁ Auto-sync on · first cloud copy created");
+  }catch(e){syncReady=false;setSyncText("Cloud sync setup error: "+e.message)}
+}
+async function pushLocalChanges(){
+  if(!sbSession||!syncReady||applyingRemote)return;if(syncing)return;
+  syncing=true;
+  try{
+    detectLocalChanges();var rows=dirtyRows();if(!rows.length)return;
+    await refreshSessionIfNeeded(false);await upsertRows(rows);markUploaded(rows);setSyncText("☁ Auto-sync on · saved "+new Date().toLocaleTimeString());
+  }catch(e){setSyncText("Cloud sync waiting to retry: "+e.message)}finally{syncing=false}
+}
+function scheduleAutoSync(){if(!sbSession||!syncReady||applyingRemote)return;clearTimeout(syncTimer);syncTimer=setTimeout(()=>pushLocalChanges(),1000)}
+async function pollCloud(){
+  if(!sbSession||!syncReady||syncing||applyingRemote)return;syncing=true;
+  try{
+    await refreshSessionIfNeeded(false);var rows=await getRows();var changed=mergeCloud(rows);if(changed)showToast("Synced from your other device");
+  }catch(e){setSyncText("☁ Auto-sync waiting for connection")}
+  finally{syncing=false}
+  if(sbSession&&syncReady) scheduleAutoSync();
+}
+async function startPolling(){stopPolling();scheduleTokenRefresh();await prepareCloudOnLogin();if(sbSession&&syncReady)pollTimer=setInterval(pollCloud,3000)}
+function stopPolling(){if(pollTimer)clearInterval(pollTimer);pollTimer=null;clearTimeout(refreshTimer);refreshTimer=null;clearTimeout(syncTimer);syncTimer=null}
+async function uploadCloud(show=true){if(!sbSession)return showToast("Sign in first");if(!syncReady)return showToast("Cloud sync is not ready yet");await pushLocalChanges();if(show)showToast("Saved to cloud")}
+async function downloadCloud(show=true){if(!sbSession)return showToast("Sign in first");if(!syncReady)return showToast("Cloud sync is not ready yet");try{var rows=await getRows();mergeCloud(rows);await pushLocalChanges();if(show)showToast("Cloud state loaded")}catch(e){showToast("Download failed")}}
+async function syncNow(){if(!sbSession)return showToast("Sign in first");if(!syncReady){await prepareCloudOnLogin();if(!syncReady)return showToast("Cloud sync is not ready yet")}await pollCloud();await pushLocalChanges();showToast("Synced")}
+function setSyncText(s){var el=document.getElementById("syncStatus");if(el)el.textContent=s}
 function render(){ensure();renderDashboard();renderWeek();renderRoadmap();renderProjects();renderSettings();renderChat()}
 function renderDashboard(){
 document.getElementById("overall").textContent=pct()+"%";document.getElementById("xp").textContent=data.xp+" XP";document.getElementById("streak").textContent=streak()+" 🔥";document.getElementById("level").textContent="Level "+level();document.getElementById("dateLabel").textContent=new Date().toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"});
@@ -492,10 +444,26 @@ function renderSettings(){
   document.getElementById("connectionResult").textContent=data.settings.backendUrl?"Backend configured. Test it to verify connectivity.":"No backend configured — Free Smart Mode is active.";
   document.getElementById("sbConnection").textContent=sbConfigured()?"✅ Supabase configured.":"Cloud sync is not configured yet.";
   document.getElementById("sbConnection").className=sbConfigured()?"notice success":"notice";
-  document.getElementById("authStatus").textContent=sbSession?.user?.email?("✅ Signed in as "+sbSession.user.email):"Not signed in.";
-  if(sbSession)setSyncText("☁ Sync on");
+
+  const signedIn=!!sbSession?.user?.email;
+  const signedInCard=document.getElementById("signedInCard");
+  const authForm=document.getElementById("authForm");
+  const signedInEmail=document.getElementById("signedInEmail");
+  const authStatus=document.getElementById("authStatus");
+  if(signedIn){
+    signedInCard.style.display="block";
+    authForm.style.display="none";
+    signedInEmail.textContent=sbSession.user.email;
+    authStatus.style.display="none";
+    setSyncText("☁ Sync on");
+  }else{
+    signedInCard.style.display="none";
+    authForm.style.display="block";
+    authStatus.style.display="block";
+    authStatus.textContent="Not signed in.";
+  }
 }
-function saveSettings(){data.settings={mode:document.getElementById("aiMode").value,backendUrl:document.getElementById("backendUrl").value.trim(),appToken:document.getElementById("appToken").value.trim(),provider:document.getElementById("provider").value};save();renderSettings()}
+function saveSettings(){data.settings={...data.settings,mode:document.getElementById("aiMode").value,backendUrl:document.getElementById("backendUrl").value.trim(),appToken:document.getElementById("appToken").value.trim(),provider:document.getElementById("provider").value};save();renderSettings()}
 function savePersonal(){data.target30=document.getElementById("target30").value.trim();data.bigTarget=document.getElementById("bigTarget").value.trim();save();showToast("Targets saved")}
 function context(){return{today:iso(),overallProgress:pct()+"%",level:level(),xp:data.xp,streak:streak(),unfinishedTasks:tasks().filter(t=>!t.done).slice(0,25).map(t=>({task:t.title,phase:t.phaseTitle,weekly:t.weekly})),weeklyGoals:data.week.goals,weeklyHours:`${data.week.hours}/${data.week.target}`,projects:data.projects.map(p=>({name:p.title,status:p.status,stack:p.stack,next:p.next})),targets:{next30:data.target30,big:data.bigTarget}}}
 function smartAnswer(q){let c=context(),u=q.toLowerCase(),next=c.unfinishedTasks[0];if(!next)return"Your roadmap is complete. Add a harder project or a new skill to the roadmap.";if(u.includes("2 hours")||u.includes("study tonight"))return`For a 2-hour session, do this:\\n\\n1) 45 min — ${next.task}\\n2) 10 min — break\\n3) 45 min — implement a tiny example for ${next.task}\\n4) 20 min — test/debug + write 5 notes\\n\\nDo not start a new framework tonight. Finish the loop: learn → build → test.`;if(u.includes("week"))return`This week:\\n\\n• Primary: ${next.task} (${next.phase})\\n• Hours: ${c.weeklyHours}\\n• Goal check: ${c.weeklyGoals.filter(g=>g.done).length}/${c.weeklyGoals.length}\\n\\nYour priority is to complete one learning block and turn it into a project artifact before moving on.`;if(u.includes("project")){let p=c.projects.find(x=>x.status!=="Live")||c.projects[0];return`Push **${p.name}** next. Its next action is: ${p.next}. Keep scope small, get a working version online, then improve it.`}return`Based on your current tracker, your next unfinished task is **${next.task}** in **${next.phase}**.\\n\\nYour move: study the concept, build one tiny example, commit it to GitHub, and record what you learned.\\n\\nCurrent progress: ${c.overallProgress} · Level ${c.level} · ${c.streak}-day streak.`}
@@ -512,13 +480,7 @@ function showToast(s){let e=document.getElementById("toast");e.textContent=s;e.s
 let deferredPrompt=null;window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredPrompt=e;document.getElementById("installCard").classList.add("show")});async function installPWA(){if(deferredPrompt){deferredPrompt.prompt();await deferredPrompt.userChoice;deferredPrompt=null}else showToast("Use browser menu → Install app / Add to Home screen")}
 loadPersistedSession();
 if(sbSession)scheduleTokenRefresh();
-if("serviceWorker" in navigator)window.addEventListener("load",async()=>{
-  try{
-    const regs=await navigator.serviceWorker.getRegistrations();
-    for(const reg of regs){try{await reg.unregister()}catch(e){}}
-    await navigator.serviceWorker.register("sw.js?v=12",{updateViaCache:"none"});
-  }catch(e){}
-});
+if("serviceWorker" in navigator)window.addEventListener("load",async()=>{try{const regs=await navigator.serviceWorker.getRegistrations();for(const reg of regs){try{await reg.unregister()}catch(e){}}await navigator.serviceWorker.register("sw.js?v=13.1",{updateViaCache:"none"})}catch(e){}});
 ensure();
 render();
 if(sbSession)startPolling();
